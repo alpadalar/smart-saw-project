@@ -1,0 +1,48 @@
+modbus:
+  ip: 192.168.13.108
+  port: 502
+  start_address: 1000
+  number_of_bits: 35
+
+database:
+  database_path: sensor/imas_testere_{}.db
+  total_database_path: sensor/total.db
+  raw_database_path: sensor/raw_data.db
+  text_file_path: sensor/data.txt
+  columns:
+    id: INTEGER
+    serit_id: INTEGER
+    serit_dis_mm: INTEGER
+    serit_tip: TEXT
+    serit_marka: TEXT
+    serit_malz: TEXT
+    malzeme_cinsi: TEXT
+    malzeme_sertlik: TEXT
+    kesit_yapisi: TEXT
+    a_mm: REAL
+    b_mm: REAL
+    c_mm: REAL
+    d_mm: REAL
+    kafa_yuksekligi_mm: REAL
+    kesilen_parca_adeti: INTEGER
+    serit_motor_akim_a: REAL
+    serit_motor_tork_percentage: REAL
+    inme_motor_akim_a: REAL
+    inme_motor_tork_percentage: REAL
+    mengene_basinc_bar: REAL
+    serit_gerginligi_bar: REAL
+    ivme_olcer_x: REAL
+    ivme_olcer_y: REAL
+    ivme_olcer_z: REAL
+    serit_sapmasi: REAL
+    ortam_sicakligi_c: REAL
+    ortam_nem_percentage: REAL
+    sogutma_sivi_sicakligi_c: REAL
+    hidrolik_yag_sicakligi_c: REAL
+    serit_sicakligi_c: REAL
+    testere_durumu: TEXT
+    alarm_status: TEXT
+    alarm_bilgisi: BYTE
+    serit_kesme_hizi: REAL
+    serit_inme_hizi: REAL
+    timestamp: INTEGER
