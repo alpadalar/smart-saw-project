@@ -9,7 +9,8 @@ import yaml
 from pymodbus.client import ModbusTcpClient
 
 # Create sensor folder with suffix dd-mm-yyyy_00:00 in sensor_data folder
-os.makedirs(f"./sensor_data/{time.strftime('%d-%m-%Y_%H-%M')}", exist_ok=True)
+nowtime = time.strftime('%d-%m-%Y_%H-%M-%S')
+os.makedirs(f"./sensor_data/{nowtime}", exist_ok=True)
 
 
 # Config dosyasını okuma
@@ -33,14 +34,14 @@ RAW_DATABASE_PATH = config["database"]["raw_database_path"]
 TEXT_FILE_PATH = config["database"]["text_file_path"]
 columns = config["database"]["columns"]
 
-broker_address = "mqtt.alperen.keenetic.link"
+broker_address = "185.87.252.58"
 port = 1883
 topic = "v1/devices/me/telemetry"
-username = "cSeFFF8IrGQ2ADFr0lgO"
+username = "3EvsGJhFyBGuZiJxbXOO"
 
-client = mqtt.Client()
-client.username_pw_set(username)
-# client.connect(broker_address, port=port)
+#client = mqtt.Client(mqtt.CallbackAPIVersion.VERSION2)
+#client.username_pw_set(username)
+#client.connect(broker_address, port=port)
 
 modbus_client = ModbusTcpClient(MODBUS_IP, port=MODBUS_PORT)
 # modbus_client.connect()
@@ -78,6 +79,7 @@ def publish_message(data):
 
 
 def write_to_text_file(data):
+    TEXT_FILE_PATH = f"./sensor_data/{nowtime}/raw.txt"
     with open(TEXT_FILE_PATH, "a") as file:
         file.write(", ".join(map(str, data)) + "\n")
 
@@ -110,8 +112,8 @@ def process_row(row_data):
     if row_data['inme_motor_akim_a'] > 15:
         row_data['inme_motor_akim_a'] = 655.35 - row_data['inme_motor_akim_a']
 
-    if row_data['serit_sapmasi'] > 15:
-        row_data['serit_sapmasi'] = row_data['serit_sapmasi'] - 6553.5
+    if abs(row_data['serit_sapmasi']) > 1.5:
+        row_data['serit_sapmasi'] = abs(row_data['serit_sapmasi']) - 655.35
 
     return row_data
 
@@ -246,10 +248,12 @@ while True:
         data_dict["timestamp"] = time.time()
         processed_data = process_row(data_dict)
         # adjust_speeds_based_on_current(processed_speed_data, adjust_time)
+        TOTAL_DATABASE_PATH = f"./sensor_data/{nowtime}/total.db"
         insert_to_database(TOTAL_DATABASE_PATH, list(processed_data.values()))
         # publish_message(processed_speed_data)
         raw_data.append(time.time())
+        RAW_DATABASE_PATH = f"./sensor_data/{nowtime}/raw.db"
         insert_to_database(RAW_DATABASE_PATH, raw_data)
         write_to_text_file(raw_data)
-        print(processed_data)
+        print(json.dumps(processed_data,indent=4))
     time.sleep(0.1)

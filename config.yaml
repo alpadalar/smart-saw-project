@@ -1,14 +1,14 @@
 modbus:
-  ip: 192.168.13.108
+  ip: 192.168.13.73
   port: 502
   start_address: 1000
-  number_of_bits: 35
+  number_of_bits: 38
 
 database:
-  database_path: sensor/imas_testere_{}.db
-  total_database_path: sensor/total.db
-  raw_database_path: sensor/raw_data.db
-  text_file_path: sensor/data.txt
+  database_path: /imas_testere_{}.db
+  total_database_path: /total.db
+  raw_database_path: /raw_data.db
+  text_file_path: /data.txt
   columns:
     id: INTEGER
     serit_id: INTEGER
@@ -45,4 +45,7 @@ database:
     alarm_bilgisi: BYTE
     serit_kesme_hizi: REAL
     serit_inme_hizi: REAL
+    ivme_olcer_x_hz: REAL
+    ivme_olcer_y_hz: REAL
+    ivme_olcer_z_hz: REAL
     timestamp: INTEGER
