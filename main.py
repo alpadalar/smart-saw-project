@@ -4,7 +4,7 @@ import sqlite3
 import time
 import os
 
-import paho.mqtt.client as mqtt
+# import paho.mqtt.client as mqtt
 import yaml
 from pymodbus.client import ModbusTcpClient
 
