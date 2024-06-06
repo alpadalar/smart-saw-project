@@ -1,5 +1,5 @@
 modbus:
-  ip: 192.168.11.196
+  ip: 192.168.13.122
   port: 502
   start_address: 1000
   number_of_bits: 38
@@ -49,3 +49,9 @@ database:
     ivme_olcer_y_hz: REAL
     ivme_olcer_z_hz: REAL
     timestamp: INTEGER
+
+mqtt:
+  broker_address: 192.168.13.123
+  port: 1883
+  topic: v1/devices/me/telemetry
+  username: 3EvsGJhFyBGuZiJxbXOO
