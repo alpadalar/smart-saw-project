@@ -190,15 +190,41 @@ def reverse_calculate_value(value, value_type):
     else:
         return value
 
-def write_to_modbus_for_speed_adjustment(kesme_hizi, inme_hizi):
-    global modbus_client
+class SpeedBuffer:
+    def __init__(self):
+        self.kesme_hizi_delta = 0.0
+        self.inme_hizi_delta = 0.0
 
-    kesme_hizi_modbus_value = reverse_calculate_value(kesme_hizi, 'serit_kesme_hizi')
+    def add_to_buffer(self, kesme_hizi_increment, inme_hizi_increment):
+        self.kesme_hizi_delta += kesme_hizi_increment
+        self.inme_hizi_delta += inme_hizi_increment
+
+    def adjust_and_check(self):
+        if abs(self.kesme_hizi_delta) >= 1.0 or abs(self.inme_hizi_delta) >= 1.0:
+            return True
+        return False
+
+    def get_adjustments(self):
+        kesme_hizi_adjustment = math.floor(self.kesme_hizi_delta)
+        inme_hizi_adjustment = math.floor(self.inme_hizi_delta)
+        self.kesme_hizi_delta -= kesme_hizi_adjustment
+        self.inme_hizi_delta -= inme_hizi_adjustment
+        return kesme_hizi_adjustment, inme_hizi_adjustment
+
+speed_buffer = SpeedBuffer()
+
+def write_to_modbus_for_speed_adjustment(processed_speed_data):
+    global modbus_client
+    kesme_hizi_adjustment, inme_hizi_adjustment = speed_buffer.get_adjustments()
+    kesme_hizi_adjustment += processed_speed_data["serit_kesme_hizi"]
+    inme_hizi_adjustment += processed_speed_data["serit_inme_hizi"]
+
+    kesme_hizi_modbus_value = reverse_calculate_value(kesme_hizi_adjustment, 'serit_kesme_hizi')
     kesme_hizi_register_address = 2066
     modbus_client.write_register(kesme_hizi_register_address, kesme_hizi_modbus_value)
 
-    inme_hizi_is_negative = inme_hizi < 0
-    inme_hizi_modbus_value = reverse_calculate_value(math.ceil(abs(inme_hizi)), 'serit_inme_hizi')
+    inme_hizi_is_negative = inme_hizi_adjustment < 0
+    inme_hizi_modbus_value = reverse_calculate_value(math.ceil(abs(inme_hizi_adjustment)), 'serit_inme_hizi')
     inme_hizi_register_address = 2041
     write_to_modbus(modbus_client, inme_hizi_register_address, inme_hizi_modbus_value, inme_hizi_is_negative)
 
@@ -221,6 +247,9 @@ def adjust_speeds_based_on_current(processed_speed_data, adjust_time, prev_curre
     akim_degisim = serit_motor_akim_a - prev_current
     fuzzy_factor = fuzzy_output(serit_motor_akim_a, akim_degisim)
 
+    kesme_hizi_delta = 0.0
+    inme_hizi_delta = 0.0
+
     print(
         f"İnme hızı: {processed_speed_data['serit_inme_hizi']}, "
         f"Kesme hızı: {processed_speed_data['serit_kesme_hizi']}, "
@@ -234,54 +263,51 @@ def adjust_speeds_based_on_current(processed_speed_data, adjust_time, prev_curre
         return serit_motor_akim_a
 
     if serit_motor_tork_percentage > 7 and testere_durumu == 3:
-        processed_speed_data['serit_kesme_hizi'] *= fuzzy_factor
-        processed_speed_data['serit_inme_hizi'] *= fuzzy_factor
-        write_to_modbus_for_speed_adjustment(processed_speed_data['serit_kesme_hizi'],
-                                             processed_speed_data['serit_inme_hizi'])
+        kesme_hizi_delta += (fuzzy_factor * 0.1)
+        inme_hizi_delta += (fuzzy_factor * 0.045)
         print(
             f"Tork yüksek, hızlar fuzzy faktörü ile ayarlanıyor... İnme hızı: {processed_speed_data['serit_inme_hizi']}, "
             f"Kesme hızı: {processed_speed_data['serit_kesme_hizi']}")
 
     if serit_motor_akim_a > 34 and testere_durumu == 3:
-        processed_speed_data['serit_kesme_hizi'] *= fuzzy_factor
-        processed_speed_data['serit_inme_hizi'] *= fuzzy_factor
+        kesme_hizi_delta += (fuzzy_factor * 0.1)
+        inme_hizi_delta += (fuzzy_factor * 0.045)
         print(
             f"Akım çok yüksek, hızlar fuzzy faktörü ile ayarlanıyor... "
             f"İnme hızı: {processed_speed_data['serit_inme_hizi']}, "
             f"Kesme hızı: {processed_speed_data['serit_kesme_hizi']}")
-        write_to_modbus_for_speed_adjustment(processed_speed_data['serit_kesme_hizi'],
-                                             processed_speed_data['serit_inme_hizi'])
 
     if adjust_time - last_speed_adjustment_time < speed_adjustment_interval:
         return serit_motor_akim_a
     last_speed_adjustment_time = adjust_time
 
     if abs(serit_sapmasi) > 5:
-        processed_speed_data['serit_kesme_hizi'] *= fuzzy_factor
-        processed_speed_data['serit_inme_hizi'] *= fuzzy_factor
-        write_to_modbus_for_speed_adjustment(processed_speed_data['serit_kesme_hizi'],
-                                             processed_speed_data['serit_inme_hizi'])
+        kesme_hizi_delta += (fuzzy_factor * 0.1)
+        inme_hizi_delta += (fuzzy_factor * 0.045)
         print(
             f"Şerit sapması yüksek, hızlar fuzzy faktörü ile ayarlanıyor... "
             f"İnme hızı: {processed_speed_data['serit_inme_hizi']}, "
             f"Kesme hızı: {processed_speed_data['serit_kesme_hizi']}")
     elif testere_durumu == 3:
-        if serit_motor_akim_a < 24:
-            processed_speed_data['serit_kesme_hizi'] *= fuzzy_factor
-            processed_speed_data['serit_inme_hizi'] *= fuzzy_factor
+        if serit_motor_akim_a < 22:
+            kesme_hizi_delta += (fuzzy_factor * 0.1)
+            inme_hizi_delta += (fuzzy_factor * 0.045)
             print(
                 f"Akım düşük ve şerit sapması kabul edilebilir, hızlar fuzzy faktörü ile artırılıyor... "
                 f"İnme hızı: {processed_speed_data['serit_inme_hizi']}, "
                 f"Kesme hızı: {processed_speed_data['serit_kesme_hizi']}")
-        elif serit_motor_akim_a > 28:
-            processed_speed_data['serit_kesme_hizi'] *= fuzzy_factor
-            processed_speed_data['serit_inme_hizi'] *= fuzzy_factor
+        elif serit_motor_akim_a > 24:
+            kesme_hizi_delta += (fuzzy_factor * 0.1)
+            inme_hizi_delta += (fuzzy_factor * 0.045)
             print(
                 f"Akım yüksek, hızlar fuzzy faktörü ile azaltılıyor... "
                 f"İnme hızı: {processed_speed_data['serit_inme_hizi']}, "
                 f"Kesme hızı: {processed_speed_data['serit_kesme_hizi']}")
-        write_to_modbus_for_speed_adjustment(processed_speed_data['serit_kesme_hizi'],
-                                             processed_speed_data['serit_inme_hizi'])
+
+    speed_buffer.add_to_buffer(kesme_hizi_delta, inme_hizi_delta)
+    if speed_buffer.adjust_and_check():
+        write_to_modbus_for_speed_adjustment(processed_speed_data)
+
     return serit_motor_akim_a
 
 def read_modbus_data():
@@ -299,7 +325,7 @@ def read_modbus_data():
             raw_data.append(time.time())
             insert_to_database(RAW_DATABASE_PATH, raw_data)
             write_to_text_file(raw_data)
-            print(json.dumps(processed_data, indent=4))
+            #print(json.dumps(processed_data, indent=4))
         time.sleep(0.1)
 
 def mqtt_publisher():
@@ -315,12 +341,12 @@ def speed_controller():
 if __name__ == "__main__":
     modbus_thread = Thread(target=read_modbus_data)
     #mqtt_thread = Thread(target=mqtt_publisher)
-    speed_thread = Thread(target=speed_controller)
+    #speed_thread = Thread(target=speed_controller)
 
     modbus_thread.start()
     #mqtt_thread.start()
-    speed_thread.start()
+    #speed_thread.start()
 
     modbus_thread.join()
     #mqtt_thread.join()
-    speed_thread.join()
+    #speed_thread.join()

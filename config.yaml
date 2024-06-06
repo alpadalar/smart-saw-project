@@ -5,10 +5,10 @@ modbus:
   number_of_bits: 38
 
 database:
-  database_path: /imas_testere_{}.db
-  total_database_path: /total.db
-  raw_database_path: /raw_data.db
-  text_file_path: /data.txt
+  database_path: imas_testere_{}.db
+  total_database_path: total.db
+  raw_database_path: raw_data.db
+  text_file_path: data.txt
   columns:
     id: INTEGER
     serit_id: INTEGER
