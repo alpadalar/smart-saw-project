@@ -1,5 +1,5 @@
 modbus:
-  ip: 192.168.13.122
+  ip: 192.168.13.109
   port: 502
   start_address: 1000
   number_of_bits: 38

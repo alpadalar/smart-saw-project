@@ -11,7 +11,7 @@ from pymodbus.client import ModbusTcpClient
 import paho.mqtt.client as mqtt
 import yaml
 import matplotlib.pyplot as plt
-from camera.py import get_frames
+# from camera.py import get_frames
 
 # Create sensor folder with suffix dd-mm-yyyy_00:00 in sensor_data folder
 nowtime = time.strftime('%d-%m-%Y_%H-%M-%S')
@@ -259,8 +259,8 @@ def adjust_speeds_based_on_current(processed_speed_data, adjust_time, prev_curre
     if processed_speed_data['serit_kesme_hizi'] <= 5:
         return serit_motor_akim_a
 
-    if processed_speed_data['serit_inme_hizi'] < 29 and testere_durumu == 3:
-        processed_speed_data['serit_inme_hizi'] = 29
+    if processed_speed_data['serit_inme_hizi'] < 20 and testere_durumu == 3:
+        processed_speed_data['serit_inme_hizi'] = 20
         return serit_motor_akim_a
 
     if serit_motor_tork_percentage > 7 and testere_durumu == 3:
