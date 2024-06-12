@@ -11,6 +11,7 @@ from pymodbus.client import ModbusTcpClient
 import paho.mqtt.client as mqtt
 import yaml
 import matplotlib.pyplot as plt
+from camera.py import get_frames
 
 # Create sensor folder with suffix dd-mm-yyyy_00:00 in sensor_data folder
 nowtime = time.strftime('%d-%m-%Y_%H-%M-%S')
