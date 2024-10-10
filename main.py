@@ -1,259 +1,200 @@
-import json
-import math
-import sqlite3
-import time
 import os
-
-# import paho.mqtt.client as mqtt
+import time
 import yaml
+from threading import Thread
+from queue import Queue
+from modbus_reader import read_modbus_data
+from fuzzy_control import create_fuzzy_system, adjust_speeds_based_on_current, SpeedBuffer
+from data_handler import process_row, insert_to_database, write_to_text_file
+from mqtt_publisher import mqtt_publisher
+from ui_control import UIControl
 from pymodbus.client import ModbusTcpClient
+import tkinter as tk
+from datetime import datetime
+from camera_module import CameraModule  # Kamera modülünü içe aktarıyoruz
 
-# Create sensor folder with suffix dd-mm-yyyy_00:00 in sensor_data folder
-nowtime = time.strftime('%d-%m-%Y_%H-%M-%S')
-os.makedirs(f"./sensor_data/{nowtime}", exist_ok=True)
+# Global variables
+config_path = "config.yaml"
+base_path = os.path.join(os.getcwd(), "sensor_data")
+stop_threads = False  # Global flag to stop threads
 
 
-# Config dosyasını okuma
 def read_config(file_path):
     with open(file_path, 'r') as config_file:
         config_data = yaml.safe_load(config_file)
     return config_data
 
 
-config = read_config("config.yaml")
+def get_daily_folder(base_path):
+    today = datetime.now().strftime('%Y-%m-%d')
+    daily_folder = os.path.join(base_path, today)
+    os.makedirs(daily_folder, exist_ok=True)
+    return daily_folder
 
-# Modbus ve MQTT yapılandırma
+
+def on_closing():
+    global stop_threads
+    print("Pencere kapatılıyor...")  # Log ekledik
+    stop_threads = True
+    root.quit()  # Tkinter ana döngüsünü durdurur
+    root.destroy()  # Pencereyi yok eder
+
+
+config = read_config(config_path)
+
+# Set up paths
+daily_folder = get_daily_folder(base_path)
+DATABASE_PATH = os.path.join(daily_folder, config["database"]["database_path"].format(time.strftime("%Y%m%d%H%M%S")))
+TOTAL_DATABASE_PATH = os.path.join(daily_folder, config["database"]["total_database_path"])
+RAW_DATABASE_PATH = os.path.join(daily_folder, config["database"]["raw_database_path"])
+TEXT_FILE_PATH = os.path.join(daily_folder, config["database"]["text_file_path"])
+
+columns = config["database"]["columns"]
+columns["fuzzy_output"] = "REAL"
+columns["akim_degisim"] = "REAL"
+columns["fuzzy_control"] = "INTEGER"
+
+data_queue = Queue()
+processed_data_queue = Queue()
+plot_queue = Queue()
+
+cikis_sim = create_fuzzy_system()
+speed_buffer = SpeedBuffer()
+
 MODBUS_IP = config["modbus"]["ip"]
 MODBUS_PORT = config["modbus"]["port"]
-START_ADDRESS = config["modbus"]["start_address"]
-NUMBER_OF_BITS = config["modbus"]["number_of_bits"]
-
-DATABASE_PATH = config["database"]["database_path"].format(time.strftime("%Y%m%d%H%M%S"))
-TOTAL_DATABASE_PATH = config["database"]["total_database_path"]
-RAW_DATABASE_PATH = config["database"]["raw_database_path"]
-TEXT_FILE_PATH = config["database"]["text_file_path"]
-columns = config["database"]["columns"]
-
-broker_address = "185.87.252.58"
-port = 1883
-topic = "v1/devices/me/telemetry"
-username = "3EvsGJhFyBGuZiJxbXOO"
-
-#client = mqtt.Client(mqtt.CallbackAPIVersion.VERSION2)
-#client.username_pw_set(username)
-#client.connect(broker_address, port=port)
-
 modbus_client = ModbusTcpClient(MODBUS_IP, port=MODBUS_PORT)
-# modbus_client.connect()
 
-last_speed_adjustment_time = 0
-speed_adjustment_interval = 1
+adaptive_speed_control_enabled = False
+last_modbus_write_time = time.time()
+speed_adjustment_interval = 0.2  # Burada ayarlama aralığını belirtiyoruz
+a_mm = config.get("a_mm", 0)  # config.yaml dosyasından a_mm değerini alıyoruz, varsayılan 0
 
-
-# Veri tabanı ve MQTT işlemleri
-def create_table(db_path):
-    conn = sqlite3.connect(db_path)
-    cursor = conn.cursor()
-    create_table_query = "CREATE TABLE IF NOT EXISTS imas_testere ({})".format(
-        ", ".join(["{} {}".format(col, dtype) for col, dtype in columns.items()])
-    )
-    cursor.execute(create_table_query)
-    conn.commit()
-    conn.close()
+# **Camera Module Initialization**
+raspberry_pi_ip = "192.168.13.107"  # Kendi Raspberry Pi IP'nizi buraya girin
+camera_module = CameraModule(raspberry_pi_ip)  # `camera_module` değişkeni burada başlatıldı
 
 
-def insert_to_database(db_path, data):
-    create_table(db_path)
-    conn = sqlite3.connect(db_path)
-    cursor = conn.cursor()
-    columns_str = ", ".join(columns.keys())
-    placeholders = ", ".join(["?" for _ in columns])
-    cursor.execute(f'INSERT INTO imas_testere ({columns_str}) VALUES ({placeholders})', data)
-    conn.commit()
-    conn.close()
+def modbus_thread_func():
+    global adaptive_speed_control_enabled, last_modbus_write_time, stop_threads
+    prev_current = 0
+    while not stop_threads:
+        if not modbus_client.is_socket_open():
+            try:
+                modbus_client.connect()
+                if stop_threads:
+                    print("Modbus thread stopping...")
+                    break
+                print("Modbus connection established")
+            except Exception as e:
+                if stop_threads:
+                    print("Modbus thread stopping during connection...")
+                    break
+                print(f"Modbus connection failed: {e}")
+                time.sleep(1)
+                continue  # Retry the connection
+
+        while not stop_threads:
+            try:
+                # Burada stop_threads bayrağını lambda ile geçiyoruz
+                for raw_data in read_modbus_data(modbus_client, config["modbus"]["start_address"],
+                                                 config["modbus"]["number_of_bits"], stop_threads_flag=lambda: stop_threads):
+                    if stop_threads:  # Thread stop signal received
+                        print("Modbus thread stopping...")
+                        break
+
+                    fuzzy_output_value = None
+                    akim_degisim = None
+                    if adaptive_speed_control_enabled:
+                        data_dict = dict(zip(columns.keys(), raw_data))
+                        data_dict["timestamp"] = time.time()
+                        processed_data = process_row(data_dict)
+                        prev_current, fuzzy_output_value, akim_degisim, last_modbus_write_time = adjust_speeds_based_on_current(
+                            processed_speed_data=processed_data,
+                            prev_current=prev_current,
+                            cikis_sim=cikis_sim,
+                            modbus_client=modbus_client,
+                            adaptive_speed_control_enabled=adaptive_speed_control_enabled,
+                            speed_buffer=speed_buffer,
+                            last_modbus_write_time=last_modbus_write_time,
+                            speed_adjustment_interval=speed_adjustment_interval,
+                            a_mm=a_mm
+                        )
+                        processed_data["fuzzy_output"] = fuzzy_output_value
+                        processed_data["akim_degisim"] = akim_degisim
+                        processed_data["fuzzy_control"] = 1 if adaptive_speed_control_enabled else 0
+                        data_queue.put(processed_data)
+                        processed_data_queue.put(processed_data)
+                        if fuzzy_output_value is not None:
+                            plot_queue.put((processed_data["timestamp"], fuzzy_output_value))
+                    else:
+                        data_dict = dict(zip(columns.keys(), raw_data))
+                        data_dict["timestamp"] = time.time()
+                        processed_data = process_row(data_dict)
+                        processed_data["fuzzy_output"] = None
+                        processed_data["akim_degisim"] = None
+                        processed_data["fuzzy_control"] = 0
+                        data_queue.put(processed_data)
+                        processed_data_queue.put(processed_data)
+            except Exception as e:
+                if stop_threads:
+                    print("Modbus thread stopping...")
+                    break
+                print(f"Error reading Modbus data: {e}")
+                time.sleep(1)
+                continue  # Retry on error
+        if stop_threads:
+            break
+        time.sleep(0.1)
 
 
-def publish_message(data):
-    json_data = json.dumps(data)
-    client.publish(topic, json_data)
+def db_thread_func():
+    global stop_threads
+    while not stop_threads:
+        if not data_queue.empty():
+            processed_data = data_queue.get()
+            insert_to_database(TOTAL_DATABASE_PATH, list(processed_data.values()), columns)
+            write_to_text_file(processed_data, TEXT_FILE_PATH)
+        time.sleep(0.1)
+
+    print("DB thread stopping...")
 
 
-def write_to_text_file(data):
-    TEXT_FILE_PATH = f"./sensor_data/{nowtime}/raw.txt"
-    with open(TEXT_FILE_PATH, "a") as file:
-        file.write(", ".join(map(str, data)) + "\n")
+def mqtt_thread_func():
+    global stop_threads
+    while not stop_threads:
+        if not processed_data_queue.empty():
+            mqtt_publisher(processed_data_queue)
+        time.sleep(0.1)
+
+    print("MQTT thread stopping...")
 
 
-# Veri işleme ve hız ayarlama
-def process_row(row_data):
-    # Direkt dönüşüm işlemleri
-    row_data['testere_durumu'] = int(row_data['testere_durumu'])
-    row_data['alarm_status'] = int(row_data['alarm_status'])
-    row_data['alarm_bilgisi'] = f"0x{int(row_data['alarm_bilgisi']):04x}"
-    row_data['kafa_yuksekligi_mm'] = row_data['kafa_yuksekligi_mm'] / 10.0
-    row_data['serit_motor_akim_a'] = row_data['serit_motor_akim_a'] / 10.0
-    row_data['serit_motor_tork_percentage'] = row_data['serit_motor_tork_percentage'] / 10.0
-    row_data['inme_motor_akim_a'] = row_data['inme_motor_akim_a'] / 100.0
-    row_data['mengene_basinc_bar'] = row_data['mengene_basinc_bar'] / 10.0
-    row_data['serit_gerginligi_bar'] = row_data['serit_gerginligi_bar'] / 10.0
-    row_data['serit_sapmasi'] = row_data['serit_sapmasi'] / 100.0
-    row_data['ortam_sicakligi_c'] = row_data['ortam_sicakligi_c'] / 10.0
-    row_data['ortam_nem_percentage'] = row_data['ortam_nem_percentage'] / 10.0
-    row_data['sogutma_sivi_sicakligi_c'] = row_data['sogutma_sivi_sicakligi_c'] / 10.0
-    row_data['hidrolik_yag_sicakligi_c'] = row_data['hidrolik_yag_sicakligi_c'] / 10.0
-    row_data['ivme_olcer_x'] = row_data['ivme_olcer_x'] / 10.0
-    row_data['ivme_olcer_y'] = row_data['ivme_olcer_y'] / 10.0
-    row_data['ivme_olcer_z'] = row_data['ivme_olcer_z'] / 10.0
-    # Kesme ve inme hızı için özel dönüşüm
-    row_data['serit_kesme_hizi'] = row_data['serit_kesme_hizi'] * 0.0754
-    row_data['serit_inme_hizi'] = (row_data['serit_inme_hizi'] - 65535) * -0.06
-
-    # Conditional transformations
-    if row_data['inme_motor_akim_a'] > 15:
-        row_data['inme_motor_akim_a'] = 655.35 - row_data['inme_motor_akim_a']
-
-    if abs(row_data['serit_sapmasi']) > 1.5:
-        row_data['serit_sapmasi'] = abs(row_data['serit_sapmasi']) - 655.35
-
-    return row_data
+def toggle_fuzzy_control():
+    global adaptive_speed_control_enabled
+    adaptive_speed_control_enabled = not adaptive_speed_control_enabled
+    print(f"Adaptive Speed Control Enabled: {adaptive_speed_control_enabled}")
+    return adaptive_speed_control_enabled
 
 
-def reverse_calculate_value(value, value_type):
-    if value_type == 'serit_inme_hizi':
-        # Serit inme hızı için hesaplanan Modbus değerini al
-        return math.ceil((value / -0.06) + 65535)
-    elif value_type == 'serit_kesme_hizi':
-        # Serit kesme hızı için hesaplanan Modbus değerini al
-        return math.ceil(value / 0.0754)
-    else:
-        # Diğer tipler için genel bir dönüşüm (gerekirse)
-        return value
+if __name__ == "__main__":
+    modbus_thread = Thread(target=modbus_thread_func)
+    db_thread = Thread(target=db_thread_func)
+    mqtt_thread = Thread(target=mqtt_thread_func)
 
+    modbus_thread.start()
+    db_thread.start()
+    mqtt_thread.start()
 
-def write_to_modbus_for_speed_adjustment(kesme_hizi, inme_hizi):
-    global modbus_client
+    root = tk.Tk()
+    root.protocol("WM_DELETE_WINDOW", on_closing)  # Pencere kapatıldığında on_closing fonksiyonu çağrılır
+    ui_control = UIControl(root, toggle_fuzzy_control, plot_queue, camera_module.start_camera,
+                           camera_module.stop_camera)  # camera_module doğru bir şekilde kullanıldı
+    root.mainloop()
 
-    # Serit kesme hızı için Modbus'a yazma işlemi
-    kesme_hizi_modbus_value = reverse_calculate_value(kesme_hizi, 'serit_kesme_hizi')
-    kesme_hizi_register_address = 2066  # Örnek bir Modbus register adresi
-    modbus_client.write_register(kesme_hizi_register_address, kesme_hizi_modbus_value)
-
-    # Serit inme hızı için Modbus'a yazma işlemi (işaret biti ile)
-    inme_hizi_is_negative = inme_hizi < 0  # İşaret kontrolü
-    inme_hizi_modbus_value = reverse_calculate_value(math.ceil(abs(inme_hizi)), 'serit_inme_hizi')
-    inme_hizi_register_address = 2041  # Örnek bir Modbus register adresi
-    write_to_modbus(modbus_client, inme_hizi_register_address, inme_hizi_modbus_value, inme_hizi_is_negative)
-
-
-def write_to_modbus(modbus_client, address, value, is_negative):
-    # İşaret bitini ayarla (MSB - en anlamlı bit)
-    if not is_negative:
-        sign_bit = 1 << 15  # Negatif için 16. biti 1 yap
-    else:
-        sign_bit = 0
-
-    # Gerçek değeri ve işaret bitini birleştir
-    modbus_value = sign_bit | value & 0x7FFF  # Değerin son 15 bitini koru
-
-    # Modbus'a yaz
-    modbus_client.write_register(address, modbus_value)
-
-
-def adjust_speeds_based_on_current(processed_speed_data, adjust_time):
-    global last_speed_adjustment_time
-    serit_motor_tork_percentage = processed_speed_data.get('serit_motor_tork_percentage')
-    testere_durumu = processed_speed_data.get('testere_durumu')
-    serit_motor_akim_a = processed_speed_data.get('serit_motor_akim_a')
-    serit_sapmasi = processed_speed_data.get('serit_sapmasi')
-    print(
-        f"İnme hızı: {processed_speed_data['serit_inme_hizi']}, "
-        f"Kesme hızı: {processed_speed_data['serit_kesme_hizi']}")
-
-    if processed_speed_data['serit_kesme_hizi'] <= 5:
-        return
-
-    if processed_speed_data['serit_inme_hizi'] < 29 and testere_durumu == 3:
-        processed_speed_data['serit_inme_hizi'] = 29
-        return
-
-    if serit_motor_tork_percentage > 7 and testere_durumu == 3:
-        # Tork yüksekse hızı azalt
-        processed_speed_data['serit_kesme_hizi'] *= 0.98
-        processed_speed_data['serit_inme_hizi'] *= 0.98
-        write_to_modbus_for_speed_adjustment(processed_speed_data['serit_kesme_hizi'],
-                                             processed_speed_data['serit_inme_hizi'])
-        print(
-            f"Tork yüksek, hızlar azaltılıyor... İnme hızı: {processed_speed_data['serit_inme_hizi']}, "
-            f"Kesme hızı: {processed_speed_data['serit_kesme_hizi']}")
-
-    if serit_motor_akim_a > 34 and testere_durumu == 3:
-        # Akım yüksek, hızı azalt
-        processed_speed_data['serit_kesme_hizi'] *= 0.8
-        processed_speed_data['serit_inme_hizi'] *= 0.8
-        print(
-            f"Akım çok yüksek, hızlar azaltılıyor... "
-            f"İnme hızı: {processed_speed_data['serit_inme_hizi']}, "
-            f"Kesme hızı: {processed_speed_data['serit_kesme_hizi']}")
-        # Modbus'a hız ayarlamalarını yaz
-        write_to_modbus_for_speed_adjustment(processed_speed_data['serit_kesme_hizi'],
-                                             processed_speed_data['serit_inme_hizi'])
-
-    # Belirtilen aralıkta bir kez çalıştır
-    if adjust_time - last_speed_adjustment_time < speed_adjustment_interval:
-        return
-    last_speed_adjustment_time = adjust_time  # Son çalışma zamanını güncelle
-
-    # Şerit sapması öncelikli kontrol
-    if abs(serit_sapmasi) > 5:
-        # Şerit sapması yüksekse hızı azalt
-        processed_speed_data['serit_kesme_hizi'] *= 1
-        processed_speed_data['serit_inme_hizi'] *= 0.98
-        write_to_modbus_for_speed_adjustment(processed_speed_data['serit_kesme_hizi'],
-                                             processed_speed_data['serit_inme_hizi'])
-        print(
-            f"Şerit sapması yüksek, hızlar azaltılıyor... "
-            f"İnme hızı: {processed_speed_data['serit_inme_hizi']}, "
-            f"Kesme hızı: {processed_speed_data['serit_kesme_hizi']}")
-    elif testere_durumu == 3:
-        # Şerit sapması kabul edilebilir seviyede ise akım kontrolü yap
-        if serit_motor_akim_a < 24:
-            # Akım düşük ve şerit sapması kabul edilebilir seviyede, hızı artır
-            processed_speed_data['serit_kesme_hizi'] *= 1.02
-            processed_speed_data['serit_inme_hizi'] *= 1.02
-            print(
-                f"Akım düşük ve şerit sapması kabul edilebilir, hızlar artırılıyor... "
-                f"İnme hızı: {processed_speed_data['serit_inme_hizi']}, "
-                f"Kesme hızı: {processed_speed_data['serit_kesme_hizi']}")
-        elif serit_motor_akim_a > 28:
-            # Akım yüksek, hızı azalt
-            processed_speed_data['serit_kesme_hizi'] *= 1
-            processed_speed_data['serit_inme_hizi'] *= 0.98
-            print(
-                f"Akım yüksek, hızlar azaltılıyor... "
-                f"İnme hızı: {processed_speed_data['serit_inme_hizi']}, "
-                f"Kesme hızı: {processed_speed_data['serit_kesme_hizi']}")
-        # Modbus'a hız ayarlamalarını yaz
-        write_to_modbus_for_speed_adjustment(processed_speed_data['serit_kesme_hizi'],
-                                             processed_speed_data['serit_inme_hizi'])
-
-
-# Ana döngü
-while True:
-    current_time = time.time()
-    # Modbus'tan ham veri okuma
-    response = modbus_client.read_holding_registers(START_ADDRESS, NUMBER_OF_BITS)
-    if not response.isError():
-        raw_data = response.registers
-        data_dict = dict(zip(columns.keys(), raw_data))
-        data_dict["timestamp"] = time.time()
-        processed_data = process_row(data_dict)
-        # adjust_speeds_based_on_current(processed_speed_data, adjust_time)
-        TOTAL_DATABASE_PATH = f"./sensor_data/{nowtime}/total.db"
-        insert_to_database(TOTAL_DATABASE_PATH, list(processed_data.values()))
-        # publish_message(processed_speed_data)
-        raw_data.append(time.time())
-        RAW_DATABASE_PATH = f"./sensor_data/{nowtime}/raw.db"
-        insert_to_database(RAW_DATABASE_PATH, raw_data)
-        write_to_text_file(raw_data)
-        print(json.dumps(processed_data,indent=4))
-    time.sleep(0.1)
+    # Thread'lerin sonlanmasını bekle
+    print("Main thread waiting for other threads to stop...")
+    modbus_thread.join()
+    db_thread.join()
+    mqtt_thread.join()
+    print("All threads stopped.")

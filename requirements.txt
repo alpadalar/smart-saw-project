@@ -1,0 +1,11 @@
+paho-mqtt==2.1.0  # MQTT protokolü için
+PyModbus==3.7.2  # Modbus TCP bağlantısı için
+opencv-python==4.10.0.84  # Kamera modülü ve görüntü işlemleri için
+Pillow==10.4.0  # OpenCV ile birlikte görüntü işleme için
+numpy==2.1.1  # Sayısal işlemler ve bulanık mantık hesaplamaları için
+scikit-fuzzy==0.5.0  # Bulanık mantık sistemi için
+matplotlib==3.9.2  # Grafik çizimi için
+scipy==1.14.1  # Bilimsel hesaplamalar ve skfuzzy için gerekli
+networkx==3.3  # skfuzzy bağımlılığı
+pandas==2.2.2  # Veri işleme ve analiz için
+PyYAML==6.0.2  # Yapılandırma dosyasını okumak için
