@@ -1,0 +1,40 @@
+# Ignore .idea directory (IDE-specific settings)
+.idea/
+
+# Ignore sensor_data and frames directories
+sensor_data/
+frames/
+
+# Python-related files
+__pycache__/
+*.py[cod]
+*.pyo
+*.pyd
+*.so
+*.egg-info/
+*.eggs
+
+# Byte-compiled / optimized / DLL files
+*.pyc
+
+# Distribution / packaging
+.Python
+env/
+venv/
+ENV/
+env.bak/
+venv.bak/
+*.egg
+*.egg-info
+dist/
+build/
+*.whl
+
+# Jupyter Notebook checkpoints
+.ipynb_checkpoints/
+
+# Log files
+*.log
+
+# Ignore virtual environment
+.venv/
