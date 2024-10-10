@@ -12,11 +12,11 @@ def create_fuzzy_system():
     akim_degisim = ctrl.Antecedent(np.arange(-10, 11, 1), 'akim_degisim')
     cikis_degisim = ctrl.Consequent(np.arange(-3, 4, 1), 'cikis_degisim')
 
-    akim['NB'] = fuzz.trapmf(akim.universe, [10, 10, 12, 19])
-    akim['NK'] = fuzz.trimf(akim.universe, [17, 19, 21])
-    akim['ideal'] = fuzz.trimf(akim.universe, [20, 21.5, 23])
-    akim['PK'] = fuzz.trimf(akim.universe, [22, 24, 26])
-    akim['PB'] = fuzz.trapmf(akim.universe, [25, 30, 34, 34])
+    akim['NB'] = fuzz.trapmf(akim.universe, [10, 10, 12, 17])
+    akim['NK'] = fuzz.trimf(akim.universe, [16, 18, 20])
+    akim['ideal'] = fuzz.trimf(akim.universe, [19, 20.5, 22])
+    akim['PK'] = fuzz.trimf(akim.universe, [21, 23, 25])
+    akim['PB'] = fuzz.trapmf(akim.universe, [24, 30, 34, 34])
 
     akim_degisim['NB'] = fuzz.trapmf(akim_degisim.universe, [-10, -10, -3, -1])
     akim_degisim['NK'] = fuzz.trimf(akim_degisim.universe, [-3, -1, 1])
@@ -140,7 +140,7 @@ def adjust_speeds_based_on_current(processed_speed_data, prev_current, cikis_sim
     serit_motor_akim_a = processed_speed_data.get('serit_motor_akim_a')
     akim_degisim = serit_motor_akim_a - prev_current
     fuzzy_factor = fuzzy_output(cikis_sim, serit_motor_akim_a, akim_degisim)
-    print(fuzzy_factor)
+    # print(fuzzy_factor)
 
     if fuzzy_factor < 0:
         inme_carpan = 0.1
@@ -189,12 +189,14 @@ def adjust_speeds_based_on_current(processed_speed_data, prev_current, cikis_sim
                     new_serit_kesme_hizi += 0.1
                 ratio = (new_serit_inme_hizi / new_serit_kesme_hizi) * 100
 
-        print("yeni kesme hız: ", new_serit_kesme_hizi)
+        print("KESME HIZI ORANI: ", ratio)
+
+#         print("yeni kesme hız: ", new_serit_kesme_hizi)
         kesme_hizi_modbus_value = reverse_calculate_value(new_serit_kesme_hizi, 'serit_kesme_hizi')
-        print("hesaplanan kesme hız: ", kesme_hizi_modbus_value)
-        print("yeni inme hız: ", new_serit_inme_hizi)
+#         print("hesaplanan kesme hız: ", kesme_hizi_modbus_value)
+#         print("yeni inme hız: ", new_serit_inme_hizi)
         inme_hizi_modbus_value = reverse_calculate_value(new_serit_inme_hizi, 'serit_inme_hizi')
-        print("hesaplanan inme hız: ", inme_hizi_modbus_value)
+#         print("hesaplanan inme hız: ", inme_hizi_modbus_value)
 
         kesme_hizi_register_address = 2066
         inme_hizi_register_address = 2041

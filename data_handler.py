@@ -131,9 +131,9 @@ def process_row(row_data, fuzzy_output_value=None):
     row_data['ortam_nem_percentage'] = row_data['ortam_nem_percentage'] / 10.0
     row_data['sogutma_sivi_sicakligi_c'] = row_data['sogutma_sivi_sicakligi_c'] / 10.0
     row_data['hidrolik_yag_sicakligi_c'] = row_data['hidrolik_yag_sicakligi_c'] / 10.0
-    row_data['ivme_olcer_x'] = row_data['ivme_olcer_x'] / 10.0
-    row_data['ivme_olcer_y'] = row_data['ivme_olcer_y'] / 10.0
-    row_data['ivme_olcer_z'] = row_data['ivme_olcer_z'] / 10.0
+    row_data['ivme_olcer_x'] = row_data['ivme_olcer_x'] / 1.0
+    row_data['ivme_olcer_y'] = row_data['ivme_olcer_y'] / 1.0
+    row_data['ivme_olcer_z'] = row_data['ivme_olcer_z'] / 1.0
     row_data['serit_kesme_hizi'] = row_data['serit_kesme_hizi'] * 0.0754
     if row_data['serit_inme_hizi'] == 0:
         row_data['serit_inme_hizi'] = 0.0

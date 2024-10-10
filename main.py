@@ -4,7 +4,7 @@ import yaml
 from threading import Thread
 from queue import Queue
 from modbus_reader import read_modbus_data
-from fuzzy_control import create_fuzzy_system, adjust_speeds_based_on_current, SpeedBuffer
+from new_fuzzy_control import create_fuzzy_system, adjust_speeds_based_on_current, SpeedBuffer
 from data_handler import process_row, insert_to_database, write_to_text_file
 from mqtt_publisher import mqtt_publisher
 from ui_control import UIControl

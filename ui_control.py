@@ -4,6 +4,8 @@ from matplotlib.backends.backend_tkagg import FigureCanvasTkAgg
 from matplotlib.dates import DateFormatter
 import pandas as pd
 from datetime import datetime, timedelta
+import threading
+import queue
 
 
 class UIControl:
@@ -55,6 +57,8 @@ class UIControl:
         self.update_plot()
         self.update_table()
 
+        self.camera_thread = None
+
     def toggle_fuzzy_control(self):
         fuzzy_enabled = self.toggle_fuzzy_control_callback()
         if fuzzy_enabled:
@@ -65,18 +69,29 @@ class UIControl:
 
     def toggle_camera(self):
         if self.camera_running:
-            self.stop_camera_callback()
-            self.camera_button.config(text="Start Camera")
-            self.camera_running = False
+            self.stop_camera()
         else:
-            self.start_camera_callback()
-            self.camera_button.config(text="Stop Camera")
-            self.camera_running = True
+            self.start_camera()
+
+    def start_camera(self):
+        self.camera_running = True
+        self.camera_button.config(text="Stop Camera")
+        self.camera_thread = threading.Thread(target=self.start_camera_callback)
+        self.camera_thread.daemon = True
+        self.camera_thread.start()
+
+    def stop_camera(self):
+        self.camera_running = False
+        self.stop_camera_callback()
+        self.camera_button.config(text="Start Camera")
+        if self.camera_thread is not None:
+            self.camera_thread.join(timeout=1)
+            self.camera_thread = None
 
     def update_plot(self):
         while not self.plot_queue.empty():
             timestamp, y = self.plot_queue.get()
-            self.xdata.append(datetime.fromtimestamp(timestamp))
+            self.xdata.append(datetime.timestamp)
             self.ydata.append(y)
             # Keep only the last 10 seconds of data
             self.xdata = [x for x in self.xdata if x >= datetime.now() - timedelta(seconds=10)]
