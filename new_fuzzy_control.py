@@ -137,6 +137,12 @@ def adjust_speeds_based_on_current(processed_speed_data, prev_current, cikis_sim
     if not adaptive_speed_control_enabled or testere_durumu != 3:
         return processed_speed_data.get('serit_motor_akim_a'), None, None, last_modbus_write_time
 
+    current_time = time.time()
+
+    # Eğer testere durumu 3 ise, fuzzy işlemi başlamadan önce 5 saniye bekleyelim
+    if current_time - last_modbus_write_time < 5:
+        return processed_speed_data.get('serit_motor_akim_a'), None, None, last_modbus_write_time
+
     serit_motor_akim_a = processed_speed_data.get('serit_motor_akim_a')
     akim_degisim = serit_motor_akim_a - prev_current
     fuzzy_factor = fuzzy_output(cikis_sim, serit_motor_akim_a, akim_degisim)
@@ -156,14 +162,14 @@ def adjust_speeds_based_on_current(processed_speed_data, prev_current, cikis_sim
         processed_speed_data['serit_inme_hizi'] = 20
         return serit_motor_akim_a, fuzzy_factor, akim_degisim, last_modbus_write_time
 
-    elif processed_speed_data['serit_kesme_hizi'] >= 200 and fuzzy_factor > 0 and testere_durumu == 3:
-        processed_speed_data['serit_kesme_hizi'] = 200
+    elif processed_speed_data['serit_kesme_hizi'] >= 100 and fuzzy_factor > 0 and testere_durumu == 3:
+        processed_speed_data['serit_kesme_hizi'] = 100
         return serit_motor_akim_a, fuzzy_factor, akim_degisim, last_modbus_write_time
 
     kesme_hizi_delta += (fuzzy_factor * kesme_carpan)
     inme_hizi_delta += (fuzzy_factor * inme_carpan)
 
-    current_time = time.time()
+    # current_time = time.time()
     if current_time - last_modbus_write_time < speed_adjustment_interval:
         return serit_motor_akim_a, fuzzy_factor, akim_degisim, last_modbus_write_time
 
