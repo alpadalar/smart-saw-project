@@ -156,6 +156,10 @@ def adjust_speeds_based_on_current(processed_speed_data, prev_current, cikis_sim
         processed_speed_data['serit_inme_hizi'] = 20
         return serit_motor_akim_a, fuzzy_factor, akim_degisim, last_modbus_write_time
 
+    elif processed_speed_data['serit_kesme_hizi'] >= 200 and fuzzy_factor > 0 and testere_durumu == 3:
+        processed_speed_data['serit_kesme_hizi'] = 200
+        return serit_motor_akim_a, fuzzy_factor, akim_degisim, last_modbus_write_time
+
     kesme_hizi_delta += (fuzzy_factor * kesme_carpan)
     inme_hizi_delta += (fuzzy_factor * inme_carpan)
 
