@@ -4,7 +4,7 @@ from skfuzzy import control as ctrl
 import math
 import time
 
-kesme_orani = 50.0
+global_initial_kesme_orani = 50.0
 
 
 def create_fuzzy_system():
@@ -134,7 +134,9 @@ def adjust_speeds_based_on_current(processed_speed_data, prev_current, cikis_sim
     testere_durumu = processed_speed_data.get('testere_durumu')
     kafa_yuksekligi_mm = processed_speed_data.get('kafa_yuksekligi_mm')
 
+    # Testere durumu 3 değilse kesme oranını başlangıç değerine sıfırla
     if not adaptive_speed_control_enabled or testere_durumu != 3:
+        kesme_hizi_tracker.kesme_orani = global_initial_kesme_orani  # Oranı başlangıç değerine sıfırla
         return processed_speed_data.get('serit_motor_akim_a'), None, None, last_modbus_write_time
 
     current_time = time.time()
