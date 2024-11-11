@@ -5,6 +5,41 @@ import math
 import time
 
 global_initial_kesme_orani = 50.0
+fuzzy_enabled = 0  # 1: Fuzzy aktif, 0: Ön tanımlı hızlar
+
+speed_matrix = [
+    [300, 78, 55],
+    [290, 76, 52],
+    [280, 74, 45],
+    [270, 72, 42],
+    [260, 70, 36],
+    [250, 69, 33],
+    [240, 68, 30],
+    [230, 68, 28.5],
+    [220, 67, 27],
+    [210, 66, 25.5],
+    [200, 66, 24.8],
+    [190, 66, 24.2],
+    [180, 65, 23.6],
+    [170, 65, 23.6],
+    [160, 65, 23.4],
+    [150, 65, 23.4],
+    [140, 65, 23.4],
+    [130, 65, 23.6],
+    [120, 65, 23.6],
+    [110, 66, 24.2],
+    [100, 66, 24.8],
+    [90, 66, 25.5],
+    [80, 67, 27],
+    [70, 68, 28.5],
+    [60, 68, 30],
+    [50, 69, 33],
+    [40, 70, 36],
+    [30, 72, 42],
+    [20, 74, 45],
+    [10, 76, 52],
+    [0, 78, 55]
+]
 
 
 def create_fuzzy_system():
@@ -81,6 +116,39 @@ def reverse_calculate_value(value, value_type):
         return value
 
 
+def select_speeds_by_height(height):
+    # height değerine göre uygun satırı buluyoruz
+    for i, row in enumerate(speed_matrix):
+        if height >= row[0]:
+            return row[1], row[2]
+    # Eğer height, listedeki en küçük değerden bile küçükse, son satırdaki değerleri döndür
+    return speed_matrix[-1][1], speed_matrix[-1][2]
+
+
+def interpolate_speeds_by_height(height):
+    # Eğer yükseklik matrisin ilk değerinden büyükse veya son değerinden küçükse sınır hızlarını döndür
+    if height >= speed_matrix[0][0]:
+        return speed_matrix[0][1], speed_matrix[0][2]
+    elif height <= speed_matrix[-1][0]:
+        return speed_matrix[-1][1], speed_matrix[-1][2]
+
+    # Matris içinde height değerine en yakın iki satırı bul
+    for i in range(len(speed_matrix) - 1):
+        high = speed_matrix[i][0]
+        low = speed_matrix[i + 1][0]
+        if high >= height > low:
+            high_speeds = speed_matrix[i][1], speed_matrix[i][2]
+            low_speeds = speed_matrix[i + 1][1], speed_matrix[i + 1][2]
+
+            # Lineer interpolasyon hesapla
+            kesme_hizi = ((height - low) / (high - low)) * (high_speeds[0] - low_speeds[0]) + low_speeds[0]
+            inme_hizi = ((height - low) / (high - low)) * (high_speeds[1] - low_speeds[1]) + low_speeds[1]
+            return kesme_hizi, inme_hizi
+
+    # Varsayılan olarak son satırın hızlarını döndür (ekstra güvenlik için)
+    return speed_matrix[-1][1], speed_matrix[-1][2]
+
+
 class SpeedBuffer:
     def __init__(self):
         self.kesme_hizi_delta = 0.0
@@ -134,92 +202,121 @@ def adjust_speeds_based_on_current(processed_speed_data, prev_current, cikis_sim
     testere_durumu = processed_speed_data.get('testere_durumu')
     kafa_yuksekligi_mm = processed_speed_data.get('kafa_yuksekligi_mm')
 
-    # Testere durumu 3 değilse kesme oranını başlangıç değerine sıfırla
-    if not adaptive_speed_control_enabled or testere_durumu != 3:
-        kesme_hizi_tracker.kesme_orani = global_initial_kesme_orani  # Oranı başlangıç değerine sıfırla
-        return processed_speed_data.get('serit_motor_akim_a'), None, None, last_modbus_write_time
+    global fuzzy_enabled
+    if fuzzy_enabled:
+        # Testere durumu 3 değilse kesme oranını başlangıç değerine sıfırla
+        if not adaptive_speed_control_enabled or testere_durumu != 3:
+            kesme_hizi_tracker.kesme_orani = global_initial_kesme_orani  # Oranı başlangıç değerine sıfırla
+            return processed_speed_data.get('serit_motor_akim_a'), None, None, last_modbus_write_time
 
-    current_time = time.time()
+        current_time = time.time()
 
-    # Eğer testere durumu 3 ise, fuzzy işlemi başlamadan önce 5 saniye bekleyelim
-    if current_time - last_modbus_write_time < 5:
-        return processed_speed_data.get('serit_motor_akim_a'), None, None, last_modbus_write_time
+        # Eğer testere durumu 3 ise, fuzzy işlemi başlamadan önce 5 saniye bekleyelim
+        if current_time - last_modbus_write_time < 5:
+            return processed_speed_data.get('serit_motor_akim_a'), None, None, last_modbus_write_time
 
-    serit_motor_akim_a = processed_speed_data.get('serit_motor_akim_a')
-    akim_degisim = serit_motor_akim_a - prev_current
-    fuzzy_factor = fuzzy_output(cikis_sim, serit_motor_akim_a, akim_degisim)
-    # print(fuzzy_factor)
+        serit_motor_akim_a = processed_speed_data.get('serit_motor_akim_a')
+        akim_degisim = serit_motor_akim_a - prev_current
+        fuzzy_factor = fuzzy_output(cikis_sim, serit_motor_akim_a, akim_degisim)
+        # print(fuzzy_factor)
 
-    if fuzzy_factor < 0:
-        inme_carpan = 0.1
-        kesme_carpan = (kesme_hizi_tracker.kesme_orani / 1000)
-    else:
-        inme_carpan = (kesme_hizi_tracker.kesme_orani / 1000)
-        kesme_carpan = 0.1
+        if fuzzy_factor < 0:
+            inme_carpan = 0.1
+            kesme_carpan = (kesme_hizi_tracker.kesme_orani / 1000)
+        else:
+            inme_carpan = (kesme_hizi_tracker.kesme_orani / 1000)
+            kesme_carpan = 0.1
 
-    kesme_hizi_delta = 0.0
-    inme_hizi_delta = 0.0
+        kesme_hizi_delta = 0.0
+        inme_hizi_delta = 0.0
 
-    if processed_speed_data['serit_inme_hizi'] <= 20 and fuzzy_factor < 0 and testere_durumu == 3:
-        processed_speed_data['serit_inme_hizi'] = 20
+        if processed_speed_data['serit_inme_hizi'] <= 20 and fuzzy_factor < 0 and testere_durumu == 3:
+            processed_speed_data['serit_inme_hizi'] = 20
+            return serit_motor_akim_a, fuzzy_factor, akim_degisim, last_modbus_write_time
+
+        elif processed_speed_data['serit_kesme_hizi'] >= 100 and fuzzy_factor > 0 and testere_durumu == 3:
+            processed_speed_data['serit_kesme_hizi'] = 100
+            return serit_motor_akim_a, fuzzy_factor, akim_degisim, last_modbus_write_time
+
+        kesme_hizi_delta += (fuzzy_factor * kesme_carpan)
+        inme_hizi_delta += (fuzzy_factor * inme_carpan)
+
+        # current_time = time.time()
+        if current_time - last_modbus_write_time < speed_adjustment_interval:
+            return serit_motor_akim_a, fuzzy_factor, akim_degisim, last_modbus_write_time
+
+        speed_buffer.add_to_buffer(kesme_hizi_delta, inme_hizi_delta)
+
+        if speed_buffer.adjust_and_check():
+            kesme_hizi_adjustment, inme_hizi_adjustment = speed_buffer.get_adjustments()
+            new_serit_kesme_hizi = processed_speed_data['serit_kesme_hizi'] + kesme_hizi_adjustment
+            new_serit_inme_hizi = processed_speed_data['serit_inme_hizi'] + inme_hizi_adjustment
+
+            kesme_hizi_tracker.check_and_update_orani(new_serit_kesme_hizi)
+
+            # Hızların oranını koruma
+            ratio = (new_serit_inme_hizi / new_serit_kesme_hizi) * 100
+            if ratio < (kesme_hizi_tracker.kesme_orani - 1.0):
+                while ratio < (kesme_hizi_tracker.kesme_orani - 1.0):
+                    if fuzzy_factor < 0:
+                        new_serit_kesme_hizi -= 0.1
+                    elif fuzzy_factor > 0:
+                        new_serit_inme_hizi += 0.1
+                    ratio = (new_serit_inme_hizi / new_serit_kesme_hizi) * 100
+            elif ratio > (kesme_hizi_tracker.kesme_orani + 1.0):
+                while ratio > (kesme_hizi_tracker.kesme_orani + 1.0):
+                    if fuzzy_factor < 0:
+                        new_serit_inme_hizi -= 0.1
+                    elif fuzzy_factor > 0:
+                        new_serit_kesme_hizi += 0.1
+                    ratio = (new_serit_inme_hizi / new_serit_kesme_hizi) * 100
+
+            print("KESME HIZI ORANI: ", ratio)
+
+    #         print("yeni kesme hız: ", new_serit_kesme_hizi)
+            kesme_hizi_modbus_value = reverse_calculate_value(new_serit_kesme_hizi, 'serit_kesme_hizi')
+    #         print("hesaplanan kesme hız: ", kesme_hizi_modbus_value)
+    #         print("yeni inme hız: ", new_serit_inme_hizi)
+            inme_hizi_modbus_value = reverse_calculate_value(new_serit_inme_hizi, 'serit_inme_hizi')
+    #         print("hesaplanan inme hız: ", inme_hizi_modbus_value)
+
+            kesme_hizi_register_address = 2066
+            inme_hizi_register_address = 2041
+
+            inme_hizi_is_negative = new_serit_inme_hizi < 0
+            write_to_modbus(modbus_client, kesme_hizi_register_address, kesme_hizi_modbus_value)
+            write_to_modbus(modbus_client, inme_hizi_register_address, inme_hizi_modbus_value, inme_hizi_is_negative)
+
+            last_modbus_write_time = current_time
+
         return serit_motor_akim_a, fuzzy_factor, akim_degisim, last_modbus_write_time
 
-    elif processed_speed_data['serit_kesme_hizi'] >= 100 and fuzzy_factor > 0 and testere_durumu == 3:
-        processed_speed_data['serit_kesme_hizi'] = 100
-        return serit_motor_akim_a, fuzzy_factor, akim_degisim, last_modbus_write_time
-
-    kesme_hizi_delta += (fuzzy_factor * kesme_carpan)
-    inme_hizi_delta += (fuzzy_factor * inme_carpan)
-
-    # current_time = time.time()
-    if current_time - last_modbus_write_time < speed_adjustment_interval:
-        return serit_motor_akim_a, fuzzy_factor, akim_degisim, last_modbus_write_time
-
-    speed_buffer.add_to_buffer(kesme_hizi_delta, inme_hizi_delta)
-
-    if speed_buffer.adjust_and_check():
-        kesme_hizi_adjustment, inme_hizi_adjustment = speed_buffer.get_adjustments()
-        new_serit_kesme_hizi = processed_speed_data['serit_kesme_hizi'] + kesme_hizi_adjustment
-        new_serit_inme_hizi = processed_speed_data['serit_inme_hizi'] + inme_hizi_adjustment
-
-        kesme_hizi_tracker.check_and_update_orani(new_serit_kesme_hizi)
-
-        # Hızların oranını koruma
-        ratio = (new_serit_inme_hizi / new_serit_kesme_hizi) * 100
-        if ratio < (kesme_hizi_tracker.kesme_orani - 1.0):
-            while ratio < (kesme_hizi_tracker.kesme_orani - 1.0):
-                if fuzzy_factor < 0:
-                    new_serit_kesme_hizi -= 0.1
-                elif fuzzy_factor > 0:
-                    new_serit_inme_hizi += 0.1
-                ratio = (new_serit_inme_hizi / new_serit_kesme_hizi) * 100
-        elif ratio > (kesme_hizi_tracker.kesme_orani + 1.0):
-            while ratio > (kesme_hizi_tracker.kesme_orani + 1.0):
-                if fuzzy_factor < 0:
-                    new_serit_inme_hizi -= 0.1
-                elif fuzzy_factor > 0:
-                    new_serit_kesme_hizi += 0.1
-                ratio = (new_serit_inme_hizi / new_serit_kesme_hizi) * 100
-
-        print("KESME HIZI ORANI: ", ratio)
-
-#         print("yeni kesme hız: ", new_serit_kesme_hizi)
+    elif fuzzy_enabled == 0 and testere_durumu == 3:
+        current_time = time.time()
+        # Matris kısmı
+        kafa_yuksekligi_mm = processed_speed_data.get('kafa_yuksekligi_mm')
+        serit_kesme_hizi, serit_inme_hizi = interpolate_speeds_by_height(kafa_yuksekligi_mm)
+        processed_speed_data['serit_kesme_hizi'] = serit_kesme_hizi * 1.2
+        processed_speed_data['serit_inme_hizi'] = serit_inme_hizi * 1.2
+        new_serit_kesme_hizi = processed_speed_data['serit_kesme_hizi']
+        new_serit_inme_hizi = processed_speed_data['serit_inme_hizi']
         kesme_hizi_modbus_value = reverse_calculate_value(new_serit_kesme_hizi, 'serit_kesme_hizi')
-#         print("hesaplanan kesme hız: ", kesme_hizi_modbus_value)
-#         print("yeni inme hız: ", new_serit_inme_hizi)
         inme_hizi_modbus_value = reverse_calculate_value(new_serit_inme_hizi, 'serit_inme_hizi')
-#         print("hesaplanan inme hız: ", inme_hizi_modbus_value)
 
         kesme_hizi_register_address = 2066
         inme_hizi_register_address = 2041
-
         inme_hizi_is_negative = new_serit_inme_hizi < 0
+
         write_to_modbus(modbus_client, kesme_hizi_register_address, kesme_hizi_modbus_value)
         write_to_modbus(modbus_client, inme_hizi_register_address, inme_hizi_modbus_value, inme_hizi_is_negative)
 
         last_modbus_write_time = current_time
 
-    return serit_motor_akim_a, fuzzy_factor, akim_degisim, last_modbus_write_time
+        serit_motor_akim_a = processed_speed_data.get('serit_motor_akim_a')
+        akim_degisim = serit_motor_akim_a - prev_current
+        fuzzy_factor = fuzzy_output(cikis_sim, serit_motor_akim_a, akim_degisim)
+
+        return serit_motor_akim_a, fuzzy_factor, akim_degisim, last_modbus_write_time
 
 
 def write_to_modbus(modbus_client, address, value, is_negative=False):

@@ -2,31 +2,61 @@ import tkinter as tk
 import matplotlib.pyplot as plt
 from matplotlib.backends.backend_tkagg import FigureCanvasTkAgg
 from matplotlib.dates import DateFormatter
-import pandas as pd
 from datetime import datetime, timedelta
 import threading
-import queue
 
 
 class UIControl:
-    def __init__(self, root, toggle_fuzzy_control_callback, plot_queue, start_camera_callback, stop_camera_callback):
+    def __init__(self, root, toggle_fuzzy_control_callback, start_camera_callback, stop_camera_callback,
+                 plot_queue, close_app_callback, conn_status=0):
         self.toggle_fuzzy_control_callback = toggle_fuzzy_control_callback
-        self.plot_queue = plot_queue
         self.start_camera_callback = start_camera_callback
         self.stop_camera_callback = stop_camera_callback
-        self.camera_running = False
+        self.plot_queue = plot_queue
         self.root = root
+        self.close_app_callback = close_app_callback
+        self.camera_running = False
+        self.fuzzy_control_enabled = False
+        self.frame_count = 0
+
+        # Pencere başlığı
         self.root.title("Control Panel")
 
-        self.status_label = tk.Label(root, text="Fuzzy Control: OFF")
+        # Bağlantı Durumu
+        if conn_status:
+            self.connection_status_label = tk.Label(root, text="Bağlantı Durumu: Bağlı")
+        else:
+            self.connection_status_label = tk.Label(root, text="Bağlantı Durumu: Bağlı Değil")
+        self.connection_status_label.pack()
+
+        # Tarih ve Saat
+        self.time_label = tk.Label(root, text="")
+        self.time_label.pack()
+        self.update_time()
+
+        # Fuzzy Control Durumu
+        self.status_label = tk.Label(root, text="Fuzzy Control: Kapalı")
         self.status_label.pack()
 
-        self.toggle_button = tk.Button(root, text="Toggle Fuzzy Control", command=self.toggle_fuzzy_control)
-        self.toggle_button.pack()
+        # Fuzzy Control Butonları
+        self.fuzzy_on_button = tk.Button(root, text="Fuzzy Aç", command=self.enable_fuzzy_control)
+        self.fuzzy_on_button.pack()
+        self.fuzzy_off_button = tk.Button(root, text="Fuzzy Kapat", command=self.disable_fuzzy_control)
+        self.fuzzy_off_button.pack()
 
-        self.camera_button = tk.Button(root, text="Start Camera", command=self.toggle_camera)
-        self.camera_button.pack()
+        # Kamera Kaydı Butonları ve Durumu
+        self.camera_status_label = tk.Label(root, text="Kamera: Kapalı")
+        self.camera_status_label.pack()
+        self.start_camera_button = tk.Button(root, text="Kamera Başlat", command=self.start_camera)
+        self.start_camera_button.pack()
+        self.stop_camera_button = tk.Button(root, text="Kamera Durdur", command=self.stop_camera)
+        self.stop_camera_button.pack()
 
+        # Alınan Frame Sayısı
+        self.frame_count_label = tk.Label(root, text="Alınan Frame Sayısı: 0")
+        self.frame_count_label.pack()
+
+        # Grafik Ayarları
         self.figure, self.ax = plt.subplots(figsize=(5, 4))
         self.ax.set_title('Fuzzy Control Output')
         self.ax.set_xlabel('Time')
@@ -40,58 +70,64 @@ class UIControl:
         self.canvas.draw()
         self.canvas.get_tk_widget().pack(side=tk.TOP, fill=tk.BOTH, expand=1)
 
-        self.table_frame = tk.Frame(root)
-        self.table_frame.pack(side=tk.BOTTOM, fill=tk.X)
+        # Uygulamayı Kapat Butonu
+        self.close_button = tk.Button(root, text="Uygulamayı Kapat", command=self.close_app_callback)
+        self.close_button.pack()
 
-        self.table_columns = ["Descent Speed", "Cutting Speed", "Descent Current", "Cutting Current", "Torques",
-                              "Band Deviation"]
-        self.table_data = {col: tk.StringVar() for col in self.table_columns}
-
-        self.table = tk.Frame(self.table_frame)
-        for i, col in enumerate(self.table_columns):
-            tk.Label(self.table, text=col).grid(row=0, column=i)
-            tk.Label(self.table, textvariable=self.table_data[col]).grid(row=1, column=i)
-
-        self.table.pack()
-
+        # Arayüz güncellemeleri
         self.update_plot()
-        self.update_table()
 
-        self.camera_thread = None
+    def update_time(self):
+        current_time = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        self.time_label.config(text=f"Tarih & Saat: {current_time}")
+        self.root.after(1000, self.update_time)
 
-    def toggle_fuzzy_control(self):
-        fuzzy_enabled = self.toggle_fuzzy_control_callback()
-        if fuzzy_enabled:
-            self.status_label.config(text="Fuzzy Control: ON")
-        else:
-            self.status_label.config(text="Fuzzy Control: OFF")
-        print(f"Fuzzy Control Toggled: {'ON' if fuzzy_enabled else 'OFF'}")
+    def enable_fuzzy_control(self):
+        self.fuzzy_control_enabled = True
+        self.status_label.config(text="Fuzzy Control: Açık")
+        self.toggle_fuzzy_control_callback()
+        print("Fuzzy Control Açıldı")
 
-    def toggle_camera(self):
-        if self.camera_running:
-            self.stop_camera()
-        else:
-            self.start_camera()
+    def disable_fuzzy_control(self):
+        self.fuzzy_control_enabled = False
+        self.status_label.config(text="Fuzzy Control: Kapalı")
+        self.toggle_fuzzy_control_callback()
+        print("Fuzzy Control Kapandı")
 
     def start_camera(self):
-        self.camera_running = True
-        self.camera_button.config(text="Stop Camera")
-        self.camera_thread = threading.Thread(target=self.start_camera_callback)
-        self.camera_thread.daemon = True
-        self.camera_thread.start()
+        if not self.camera_running:
+            self.camera_running = True
+            self.camera_status_label.config(text="Kamera: Açık")
+            self.frame_count = 0
+            self.update_frame_count()
+            self.camera_thread = threading.Thread(target=self.start_camera_callback)
+            self.camera_thread.start()
+            print("Kamera Kaydı Başlatıldı")
 
     def stop_camera(self):
-        self.camera_running = False
-        self.stop_camera_callback()
-        self.camera_button.config(text="Start Camera")
-        if self.camera_thread is not None:
-            self.camera_thread.join(timeout=1)
-            self.camera_thread = None
+        if self.camera_running:
+            self.camera_running = False
+            self.camera_status_label.config(text="Kamera: Kapalı")
+            self.stop_camera_callback()
+            print("Kamera Kaydı Durduruldu")
+
+    def update_frame_count(self):
+        self.frame_count += 1
+        self.frame_count_label.config(text=f"Alınan Frame Sayısı: {self.frame_count}")
+        if self.camera_running:
+            self.root.after(100, self.update_frame_count)
 
     def update_plot(self):
         while not self.plot_queue.empty():
             timestamp, y = self.plot_queue.get()
-            self.xdata.append(datetime.timestamp)
+            # timestamp'ı datetime objesine dönüştür
+            if isinstance(timestamp, str):
+                try:
+                    timestamp = datetime.strptime(timestamp, "%Y-%m-%d %H:%M:%S.%f")  # Milisaniye içeren format
+                except ValueError:
+                    timestamp = datetime.strptime(timestamp, "%Y-%m-%d %H:%M:%S")  # Milisaniye yoksa standart format
+
+            self.xdata.append(timestamp)
             self.ydata.append(y)
             # Keep only the last 10 seconds of data
             self.xdata = [x for x in self.xdata if x >= datetime.now() - timedelta(seconds=10)]
@@ -102,15 +138,3 @@ class UIControl:
 
         self.canvas.draw()
         self.root.after(100, self.update_plot)
-
-    def update_table(self):
-        while not self.plot_queue.empty():
-            _, data = self.plot_queue.get()
-            self.table_data["Descent Speed"].set(data.get("serit_inme_hizi", "N/A"))
-            self.table_data["Cutting Speed"].set(data.get("serit_kesme_hizi", "N/A"))
-            self.table_data["Descent Current"].set(data.get("inme_motor_akim_a", "N/A"))
-            self.table_data["Cutting Current"].set(data.get("serit_motor_akim_a", "N/A"))
-            self.table_data["Torques"].set(data.get("inme_motor_tork_percentage", "N/A"))
-            self.table_data["Band Deviation"].set(data.get("serit_sapmasi", "N/A"))
-
-        self.root.after(100, self.update_table)

@@ -11,7 +11,7 @@ from ui_control import UIControl
 from pymodbus.client import ModbusTcpClient
 import tkinter as tk
 from datetime import datetime
-from camera_module import CameraModule  # Kamera modülünü içe aktarıyoruz
+from camera_module import CameraModule
 
 # Global variables
 config_path = "config.yaml"
@@ -34,7 +34,7 @@ def get_daily_folder(base_path):
 
 def on_closing():
     global stop_threads
-    print("Pencere kapatılıyor...")  # Log ekledik
+    print("Uygulama kapatılıyor...")
     stop_threads = True
     root.quit()  # Tkinter ana döngüsünü durdurur
     root.destroy()  # Pencereyi yok eder
@@ -67,16 +67,18 @@ modbus_client = ModbusTcpClient(MODBUS_IP, port=MODBUS_PORT)
 
 adaptive_speed_control_enabled = False
 last_modbus_write_time = time.time()
-speed_adjustment_interval = 0.2  # Burada ayarlama aralığını belirtiyoruz
-a_mm = config.get("a_mm", 0)  # config.yaml dosyasından a_mm değerini alıyoruz, varsayılan 0
+speed_adjustment_interval = 0.2
+a_mm = config.get("a_mm", 0)
 
-# **Camera Module Initialization**
-raspberry_pi_ip = "192.168.13.107"  # Kendi Raspberry Pi IP'nizi buraya girin
-camera_module = CameraModule(raspberry_pi_ip)  # `camera_module` değişkeni burada başlatıldı
+# Camera Module Initialization
+raspberry_pi_ip = "192.168.13.107"
+camera_module = CameraModule(raspberry_pi_ip)
+
+conn_status = 0
 
 
 def modbus_thread_func():
-    global adaptive_speed_control_enabled, last_modbus_write_time, stop_threads
+    global adaptive_speed_control_enabled, last_modbus_write_time, stop_threads, conn_status
     prev_current = 0
     while not stop_threads:
         if not modbus_client.is_socket_open():
@@ -86,20 +88,21 @@ def modbus_thread_func():
                     print("Modbus thread stopping...")
                     break
                 print("Modbus connection established")
+                conn_status = 1
             except Exception as e:
                 if stop_threads:
                     print("Modbus thread stopping during connection...")
                     break
                 print(f"Modbus connection failed: {e}")
                 time.sleep(1)
-                continue  # Retry the connection
+                continue
 
         while not stop_threads:
             try:
-                # Burada stop_threads bayrağını lambda ile geçiyoruz
                 for raw_data in read_modbus_data(modbus_client, config["modbus"]["start_address"],
-                                                 config["modbus"]["number_of_bits"], stop_threads_flag=lambda: stop_threads):
-                    if stop_threads:  # Thread stop signal received
+                                                 config["modbus"]["number_of_bits"],
+                                                 stop_threads_flag=lambda: stop_threads, conn_status=conn_status):
+                    if stop_threads:
                         print("Modbus thread stopping...")
                         break
 
@@ -136,13 +139,14 @@ def modbus_thread_func():
                         processed_data["fuzzy_control"] = 0
                         data_queue.put(processed_data)
                         processed_data_queue.put(processed_data)
+                conn_status = 1
             except Exception as e:
                 if stop_threads:
                     print("Modbus thread stopping...")
                     break
                 print(f"Error reading Modbus data: {e}")
                 time.sleep(1)
-                continue  # Retry on error
+                continue
         if stop_threads:
             break
         time.sleep(0.1)
@@ -156,7 +160,6 @@ def db_thread_func():
             insert_to_database(TOTAL_DATABASE_PATH, list(processed_data.values()), columns)
             write_to_text_file(processed_data, TEXT_FILE_PATH)
         time.sleep(0.1)
-
     print("DB thread stopping...")
 
 
@@ -166,7 +169,6 @@ def mqtt_thread_func():
         if not processed_data_queue.empty():
             mqtt_publisher(processed_data_queue)
         time.sleep(0.1)
-
     print("MQTT thread stopping...")
 
 
@@ -187,12 +189,20 @@ if __name__ == "__main__":
     mqtt_thread.start()
 
     root = tk.Tk()
-    root.protocol("WM_DELETE_WINDOW", on_closing)  # Pencere kapatıldığında on_closing fonksiyonu çağrılır
-    ui_control = UIControl(root, toggle_fuzzy_control, plot_queue, camera_module.start_camera,
-                           camera_module.stop_camera)  # camera_module doğru bir şekilde kullanıldı
+    root.protocol("WM_DELETE_WINDOW", on_closing)
+
+    ui_control = UIControl(
+        root=root,
+        toggle_fuzzy_control_callback=toggle_fuzzy_control,
+        start_camera_callback=camera_module.start_camera,
+        stop_camera_callback=camera_module.stop_camera,
+        plot_queue=plot_queue,
+        close_app_callback=on_closing,
+        conn_status=conn_status
+    )
+
     root.mainloop()
 
-    # Thread'lerin sonlanmasını bekle
     print("Main thread waiting for other threads to stop...")
     modbus_thread.join()
     db_thread.join()
