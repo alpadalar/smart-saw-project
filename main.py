@@ -4,7 +4,7 @@ import yaml
 from threading import Thread
 from queue import Queue
 from modbus_reader import read_modbus_data
-from new_fuzzy_control import create_fuzzy_system, adjust_speeds_based_on_current, SpeedBuffer
+from sadece_inme_değiştiren_adaptif import create_fuzzy_system, adjust_speeds_based_on_current, SpeedBuffer
 from data_handler import process_row, insert_to_database, write_to_text_file
 from mqtt_publisher import mqtt_publisher
 from ui_control import UIControl
@@ -71,7 +71,7 @@ speed_adjustment_interval = 0.2
 a_mm = config.get("a_mm", 0)
 
 # Camera Module Initialization
-raspberry_pi_ip = "192.168.13.107"
+raspberry_pi_ip = "192.168.13.97"
 camera_module = CameraModule(raspberry_pi_ip)
 
 conn_status = 0

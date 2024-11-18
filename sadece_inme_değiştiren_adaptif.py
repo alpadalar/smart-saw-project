@@ -6,8 +6,7 @@ import time
 from datetime import datetime
 
 global_initial_kesme_orani = 50.0
-starting_oran = (55.0/78.0)*100
-fuzzy_enabled = 0 # 1: Fuzzy aktif, 0: Ön tanımlı hızlar
+fuzzy_enabled = 1  # 1: Fuzzy aktif, 0: Ön tanımlı hızlar
 
 speed_matrix = [
     [300, 78, 55],
@@ -177,20 +176,20 @@ class KesmeHiziTracker:
     def __init__(self):
         self.last_time_checked = time.time()
         self.initial_speed = None
-        self.kesme_orani = (55.0/78.0)*100
+        self.kesme_orani = 50.0
 
     def check_and_update_orani(self, current_speed):
         current_time = time.time()
         if self.initial_speed is None:
             self.initial_speed = current_speed
 
-        if current_time - self.last_time_checked >= 0.5:
+        if current_time - self.last_time_checked >= 10:
             speed_difference = current_speed - self.initial_speed
-            if abs(speed_difference) >= 0.5:
+            if abs(speed_difference) >= (0.1 * self.initial_speed):
                 if speed_difference > 0:
-                    self.kesme_orani += 3
+                    self.kesme_orani += 1
                 else:
-                    self.kesme_orani -= 3
+                    self.kesme_orani -= 1
                 self.initial_speed = current_speed
                 self.last_time_checked = current_time
 
@@ -204,9 +203,7 @@ def adjust_speeds_based_on_current(processed_speed_data, prev_current, cikis_sim
     testere_durumu = processed_speed_data.get('testere_durumu')
     kafa_yuksekligi_mm = processed_speed_data.get('kafa_yuksekligi_mm')
     global cutting_start_timestamp
-    global global_initial_kesme_orani
-    global_initial_kesme_orani = 50.0
-    global starting_oran
+
     global fuzzy_enabled
     if fuzzy_enabled:
         # Testere durumu 3 değilse kesme oranını başlangıç değerine sıfırla
@@ -216,8 +213,7 @@ def adjust_speeds_based_on_current(processed_speed_data, prev_current, cikis_sim
                 formatted_timestamp = cutting_start_timestamp.strftime("\n\nBİTİŞ:\nTarih: %d.%m.%Y Saat: %H:%M:%S.%f\n\n")[:-3]
                 print(formatted_timestamp)
                 cutting_start_timestamp = None
-                global_initial_kesme_orani = float(processed_speed_data.get('serit_inme_hizi')) / float(processed_speed_data.get('serit_kesme_hizi')) * 100.0
-                kesme_hizi_tracker.kesme_orani = global_initial_kesme_orani  # Oranı başlangıç değerine sıfırla
+            kesme_hizi_tracker.kesme_orani = global_initial_kesme_orani  # Oranı başlangıç değerine sıfırla
             return processed_speed_data.get('serit_motor_akim_a'), None, None, last_modbus_write_time
 
         current_time = time.time()
@@ -228,9 +224,6 @@ def adjust_speeds_based_on_current(processed_speed_data, prev_current, cikis_sim
 
         # Eğer testere durumu 3 ise, fuzzy işlemi başlamadan önce 5 saniye bekleyelim
         if current_time - last_modbus_write_time < 5:
-            global_initial_kesme_orani = float(processed_speed_data.get('serit_inme_hizi')) / float(processed_speed_data.get('serit_kesme_hizi')) * 100.0
-            kesme_hizi_tracker.kesme_orani = global_initial_kesme_orani
-            starting_oran = global_initial_kesme_orani
             return processed_speed_data.get('serit_motor_akim_a'), None, None, last_modbus_write_time
 
         serit_motor_akim_a = processed_speed_data.get('serit_motor_akim_a')
@@ -240,10 +233,10 @@ def adjust_speeds_based_on_current(processed_speed_data, prev_current, cikis_sim
 
         if fuzzy_factor < 0:
             inme_carpan = 0.1
-            kesme_carpan = (kesme_hizi_tracker.kesme_orani / 1000) * 0.7
+            kesme_carpan = (kesme_hizi_tracker.kesme_orani / 1000)
         else:
             inme_carpan = (kesme_hizi_tracker.kesme_orani / 1000)
-            kesme_carpan = 0.1 * 0.7
+            kesme_carpan = 0.1
 
         kesme_hizi_delta = 0.0
         inme_hizi_delta = 0.0
@@ -260,8 +253,8 @@ def adjust_speeds_based_on_current(processed_speed_data, prev_current, cikis_sim
         inme_hizi_delta += (fuzzy_factor * inme_carpan)
 
         # current_time = time.time()
-        # if current_time - last_modbus_write_time < speed_adjustment_interval:
-        #     return serit_motor_akim_a, fuzzy_factor, akim_degisim, last_modbus_write_time
+        if current_time - last_modbus_write_time < speed_adjustment_interval:
+            return serit_motor_akim_a, fuzzy_factor, akim_degisim, last_modbus_write_time
 
         speed_buffer.add_to_buffer(kesme_hizi_delta, inme_hizi_delta)
 
@@ -274,23 +267,23 @@ def adjust_speeds_based_on_current(processed_speed_data, prev_current, cikis_sim
             kesme_hizi_tracker.check_and_update_orani(new_serit_kesme_hizi)
 
             # Hızların oranını koruma
-            ratio = (new_serit_inme_hizi / new_serit_kesme_hizi) * 100
-            if ratio < (kesme_hizi_tracker.kesme_orani - 1.0):
-                while ratio < (kesme_hizi_tracker.kesme_orani - 1.0):
-                    if fuzzy_factor < 0:
-                        new_serit_kesme_hizi -= 0.1
-                    elif fuzzy_factor > 0:
-                        new_serit_inme_hizi += 0.1
-                    ratio = (new_serit_inme_hizi / new_serit_kesme_hizi) * 100
-            elif ratio > (kesme_hizi_tracker.kesme_orani + 1.0):
-                while ratio > (kesme_hizi_tracker.kesme_orani + 1.0):
-                    if fuzzy_factor < 0:
-                        new_serit_inme_hizi -= 0.1
-                    elif fuzzy_factor > 0:
-                        new_serit_kesme_hizi += 0.1
-                    ratio = (new_serit_inme_hizi / new_serit_kesme_hizi) * 100
+            # ratio = (new_serit_inme_hizi / new_serit_kesme_hizi) * 100
+            # if ratio < (kesme_hizi_tracker.kesme_orani - 1.0):
+            #     while ratio < (kesme_hizi_tracker.kesme_orani - 1.0):
+            #         if fuzzy_factor < 0:
+            #             new_serit_kesme_hizi -= 0.1
+            #         elif fuzzy_factor > 0:
+            #             new_serit_inme_hizi += 0.1
+            #         ratio = (new_serit_inme_hizi / new_serit_kesme_hizi) * 100
+            # elif ratio > (kesme_hizi_tracker.kesme_orani + 1.0):
+            #     while ratio > (kesme_hizi_tracker.kesme_orani + 1.0):
+            #         if fuzzy_factor < 0:
+            #             new_serit_inme_hizi -= 0.1
+            #         elif fuzzy_factor > 0:
+            #             new_serit_kesme_hizi += 0.1
+            #         ratio = (new_serit_inme_hizi / new_serit_kesme_hizi) * 100
 
-            print("KESME HIZI ORANI: ", ratio)
+            # print("KESME HIZI ORANI: ", ratio)
 
     #         print("yeni kesme hız: ", new_serit_kesme_hizi)
             kesme_hizi_modbus_value = reverse_calculate_value(new_serit_kesme_hizi, 'serit_kesme_hizi')
@@ -303,7 +296,7 @@ def adjust_speeds_based_on_current(processed_speed_data, prev_current, cikis_sim
             inme_hizi_register_address = 2041
 
             inme_hizi_is_negative = new_serit_inme_hizi < 0
-            write_to_modbus(modbus_client, kesme_hizi_register_address, kesme_hizi_modbus_value)
+            # write_to_modbus(modbus_client, kesme_hizi_register_address, kesme_hizi_modbus_value)
             write_to_modbus(modbus_client, inme_hizi_register_address, inme_hizi_modbus_value, inme_hizi_is_negative)
 
             last_modbus_write_time = current_time
@@ -319,8 +312,8 @@ def adjust_speeds_based_on_current(processed_speed_data, prev_current, cikis_sim
         # Matris kısmı
         kafa_yuksekligi_mm = processed_speed_data.get('kafa_yuksekligi_mm')
         serit_kesme_hizi, serit_inme_hizi = interpolate_speeds_by_height(kafa_yuksekligi_mm)
-        processed_speed_data['serit_kesme_hizi'] = serit_kesme_hizi * 1.0
-        processed_speed_data['serit_inme_hizi'] = serit_inme_hizi * 1.0
+        processed_speed_data['serit_kesme_hizi'] = serit_kesme_hizi * 1
+        processed_speed_data['serit_inme_hizi'] = serit_inme_hizi * 1
         new_serit_kesme_hizi = processed_speed_data['serit_kesme_hizi']
         new_serit_inme_hizi = processed_speed_data['serit_inme_hizi']
         kesme_hizi_modbus_value = reverse_calculate_value(new_serit_kesme_hizi, 'serit_kesme_hizi')
