@@ -123,6 +123,7 @@ def modbus_thread_func():
                             speed_adjustment_interval=speed_adjustment_interval,
                             a_mm=a_mm
                         )
+                        prev_current = processed_data["serit_motor_akim_a"]
                         processed_data["fuzzy_output"] = fuzzy_output_value
                         processed_data["akim_degisim"] = akim_degisim
                         processed_data["fuzzy_control"] = 1 if adaptive_speed_control_enabled else 0
@@ -137,6 +138,7 @@ def modbus_thread_func():
                         processed_data["fuzzy_output"] = None
                         processed_data["akim_degisim"] = None
                         processed_data["fuzzy_control"] = 0
+                        prev_current = processed_data["serit_motor_akim_a"]
                         data_queue.put(processed_data)
                         processed_data_queue.put(processed_data)
                 conn_status = 1

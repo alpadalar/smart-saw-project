@@ -267,8 +267,8 @@ def adjust_speeds_based_on_current(processed_speed_data, prev_current, cikis_sim
 
         if speed_buffer.adjust_and_check():
             kesme_hizi_adjustment, inme_hizi_adjustment = speed_buffer.get_adjustments()
-            # new_serit_kesme_hizi = processed_speed_data['serit_kesme_hizi'] + kesme_hizi_adjustment
-            new_serit_kesme_hizi = processed_speed_data['serit_kesme_hizi']
+            new_serit_kesme_hizi = processed_speed_data['serit_kesme_hizi'] + kesme_hizi_adjustment
+            # new_serit_kesme_hizi = processed_speed_data['serit_kesme_hizi']
             new_serit_inme_hizi = processed_speed_data['serit_inme_hizi'] + inme_hizi_adjustment
 
             kesme_hizi_tracker.check_and_update_orani(new_serit_kesme_hizi)
