@@ -4,7 +4,8 @@ import yaml
 from threading import Thread
 from queue import Queue
 from modbus_reader import read_modbus_data
-from sadece_inme_değiştiren_adaptif import create_fuzzy_system, adjust_speeds_based_on_current, SpeedBuffer
+from fuzzy_adjustment import adjust_speeds_based_on_current
+from linear_adjustment import adjust_speeds_linear
 from data_handler import process_row, insert_to_database, write_to_text_file
 from mqtt_publisher import mqtt_publisher
 from ui_control import UIControl
@@ -12,11 +13,16 @@ from pymodbus.client import ModbusTcpClient
 import tkinter as tk
 from datetime import datetime
 from camera_module import CameraModule
+from speed_utility import SpeedBuffer, KesmeHiziTracker
+from fuzzy_control import create_fuzzy_system
 
 # Global variables
 config_path = "config.yaml"
 base_path = os.path.join(os.getcwd(), "sensor_data")
 stop_threads = False  # Global flag to stop threads
+
+fuzzy_control_enabled = False
+linear_control_enabled = False
 
 
 def read_config(file_path):
@@ -40,6 +46,7 @@ def on_closing():
     root.destroy()  # Pencereyi yok eder
 
 
+# Load configuration
 config = read_config(config_path)
 
 # Set up paths
@@ -58,17 +65,17 @@ data_queue = Queue()
 processed_data_queue = Queue()
 plot_queue = Queue()
 
-cikis_sim = create_fuzzy_system()
+# Initialize fuzzy control system and utilities
 speed_buffer = SpeedBuffer()
+kesme_hizi_tracker = KesmeHiziTracker()
+cikis_sim = create_fuzzy_system()
 
 MODBUS_IP = config["modbus"]["ip"]
 MODBUS_PORT = config["modbus"]["port"]
 modbus_client = ModbusTcpClient(MODBUS_IP, port=MODBUS_PORT)
 
-adaptive_speed_control_enabled = False
 last_modbus_write_time = time.time()
 speed_adjustment_interval = 0.2
-a_mm = config.get("a_mm", 0)
 
 # Camera Module Initialization
 raspberry_pi_ip = "192.168.13.97"
@@ -78,7 +85,7 @@ conn_status = 0
 
 
 def modbus_thread_func():
-    global adaptive_speed_control_enabled, last_modbus_write_time, stop_threads, conn_status
+    global fuzzy_control_enabled, linear_control_enabled, last_modbus_write_time, stop_threads, conn_status
     prev_current = 0
     while not stop_threads:
         if not modbus_client.is_socket_open():
@@ -106,41 +113,51 @@ def modbus_thread_func():
                         print("Modbus thread stopping...")
                         break
 
+                    data_dict = dict(zip(columns.keys(), raw_data))
+                    data_dict["timestamp"] = time.time()
+                    processed_data = process_row(data_dict)
+                    if not prev_current:
+                        prev_current = None
+
                     fuzzy_output_value = None
                     akim_degisim = None
-                    if adaptive_speed_control_enabled:
-                        data_dict = dict(zip(columns.keys(), raw_data))
-                        data_dict["timestamp"] = time.time()
-                        processed_data = process_row(data_dict)
+
+                    if fuzzy_control_enabled:
+                        # Fuzzy kontrol ile ayarlama
                         prev_current, fuzzy_output_value, akim_degisim, last_modbus_write_time = adjust_speeds_based_on_current(
                             processed_speed_data=processed_data,
                             prev_current=prev_current,
-                            cikis_sim=cikis_sim,
                             modbus_client=modbus_client,
-                            adaptive_speed_control_enabled=adaptive_speed_control_enabled,
+                            adaptive_speed_control_enabled=fuzzy_control_enabled,
                             speed_buffer=speed_buffer,
                             last_modbus_write_time=last_modbus_write_time,
                             speed_adjustment_interval=speed_adjustment_interval,
-                            a_mm=a_mm
+                            kesme_hizi_tracker=kesme_hizi_tracker
                         )
-                        prev_current = processed_data["serit_motor_akim_a"]
-                        processed_data["fuzzy_output"] = fuzzy_output_value
-                        processed_data["akim_degisim"] = akim_degisim
-                        processed_data["fuzzy_control"] = 1 if adaptive_speed_control_enabled else 0
-                        data_queue.put(processed_data)
-                        processed_data_queue.put(processed_data)
-                        if fuzzy_output_value is not None:
-                            plot_queue.put((processed_data["timestamp"], fuzzy_output_value))
-                    else:
-                        data_dict = dict(zip(columns.keys(), raw_data))
-                        data_dict["timestamp"] = time.time()
-                        processed_data = process_row(data_dict)
-                        processed_data["fuzzy_output"] = None
-                        processed_data["akim_degisim"] = None
+                        processed_data["fuzzy_control"] = 1
+
+                    elif linear_control_enabled:
+                        # Lineer kontrol ile ayarlama
+                        last_modbus_write_time, fuzzy_output_value = adjust_speeds_linear(
+                            processed_speed_data=processed_data,
+                            modbus_client=modbus_client,
+                            last_modbus_write_time=last_modbus_write_time,
+                            speed_adjustment_interval=speed_adjustment_interval,
+                            cikis_sim=cikis_sim
+                        )
                         processed_data["fuzzy_control"] = 0
-                        prev_current = processed_data["serit_motor_akim_a"]
-                        data_queue.put(processed_data)
-                        processed_data_queue.put(processed_data)
+
+                    else:
+                        # Sadece veri kaydı
+                        processed_data["fuzzy_control"] = 0
+
+                    processed_data["fuzzy_output"] = fuzzy_output_value
+                    processed_data["akim_degisim"] = akim_degisim
+
+                    data_queue.put(processed_data)
+                    processed_data_queue.put(processed_data)
+                    prev_current = processed_data.get('serit_motor_akim_a', None)
+
                 conn_status = 1
             except Exception as e:
                 if stop_threads:
@@ -175,10 +192,17 @@ def mqtt_thread_func():
 
 
 def toggle_fuzzy_control():
-    global adaptive_speed_control_enabled
-    adaptive_speed_control_enabled = not adaptive_speed_control_enabled
-    print(f"Adaptive Speed Control Enabled: {adaptive_speed_control_enabled}")
-    return adaptive_speed_control_enabled
+    global fuzzy_control_enabled
+    fuzzy_control_enabled = not fuzzy_control_enabled
+    print(f"Fuzzy Control Enabled: {fuzzy_control_enabled}")
+    return fuzzy_control_enabled
+
+
+def toggle_linear_control():
+    global linear_control_enabled
+    linear_control_enabled = not linear_control_enabled
+    print(f"Linear Control Enabled: {linear_control_enabled}")
+    return linear_control_enabled
 
 
 if __name__ == "__main__":
@@ -196,6 +220,7 @@ if __name__ == "__main__":
     ui_control = UIControl(
         root=root,
         toggle_fuzzy_control_callback=toggle_fuzzy_control,
+        toggle_linear_control_callback=toggle_linear_control,
         start_camera_callback=camera_module.start_camera,
         stop_camera_callback=camera_module.stop_camera,
         plot_queue=plot_queue,

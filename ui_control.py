@@ -7,9 +7,10 @@ import threading
 
 
 class UIControl:
-    def __init__(self, root, toggle_fuzzy_control_callback, start_camera_callback, stop_camera_callback,
-                 plot_queue, close_app_callback, conn_status=0):
+    def __init__(self, root, toggle_fuzzy_control_callback, toggle_linear_control_callback,
+                 start_camera_callback, stop_camera_callback, plot_queue, close_app_callback, conn_status=0):
         self.toggle_fuzzy_control_callback = toggle_fuzzy_control_callback
+        self.toggle_linear_control_callback = toggle_linear_control_callback
         self.start_camera_callback = start_camera_callback
         self.stop_camera_callback = stop_camera_callback
         self.plot_queue = plot_queue
@@ -17,16 +18,14 @@ class UIControl:
         self.close_app_callback = close_app_callback
         self.camera_running = False
         self.fuzzy_control_enabled = False
+        self.linear_control_enabled = False
         self.frame_count = 0
 
         # Pencere başlığı
         self.root.title("Control Panel")
 
         # Bağlantı Durumu
-        if conn_status:
-            self.connection_status_label = tk.Label(root, text="Bağlantı Durumu: Bağlı")
-        else:
-            self.connection_status_label = tk.Label(root, text="Bağlantı Durumu: Bağlı Değil")
+        self.connection_status_label = tk.Label(root, text=f"Bağlantı Durumu: {'Bağlı' if conn_status else 'Bağlı Değil'}")
         self.connection_status_label.pack()
 
         # Tarih ve Saat
@@ -34,8 +33,8 @@ class UIControl:
         self.time_label.pack()
         self.update_time()
 
-        # Fuzzy Control Durumu
-        self.status_label = tk.Label(root, text="Fuzzy Control: Kapalı")
+        # Kontrol Durumu
+        self.status_label = tk.Label(root, text="Kontrol Durumu: Kapalı")
         self.status_label.pack()
 
         # Fuzzy Control Butonları
@@ -43,6 +42,12 @@ class UIControl:
         self.fuzzy_on_button.pack()
         self.fuzzy_off_button = tk.Button(root, text="Fuzzy Kapat", command=self.disable_fuzzy_control)
         self.fuzzy_off_button.pack()
+
+        # Lineer Control Butonları
+        self.linear_on_button = tk.Button(root, text="Lineer Aç", command=self.enable_linear_control)
+        self.linear_on_button.pack()
+        self.linear_off_button = tk.Button(root, text="Lineer Kapat", command=self.disable_linear_control)
+        self.linear_off_button.pack()
 
         # Kamera Kaydı Butonları ve Durumu
         self.camera_status_label = tk.Label(root, text="Kamera: Kapalı")
@@ -58,9 +63,9 @@ class UIControl:
 
         # Grafik Ayarları
         self.figure, self.ax = plt.subplots(figsize=(5, 4))
-        self.ax.set_title('Fuzzy Control Output')
-        self.ax.set_xlabel('Time')
-        self.ax.set_ylabel('Fuzzy Output')
+        self.ax.set_title('Fuzzy Çıkışı')
+        self.ax.set_xlabel('Zaman')
+        self.ax.set_ylabel('Çıkış Değeri')
         self.line, = self.ax.plot([], [], 'r-')
         self.ax.xaxis.set_major_formatter(DateFormatter('%H:%M:%S'))
         self.xdata = []
@@ -84,15 +89,29 @@ class UIControl:
 
     def enable_fuzzy_control(self):
         self.fuzzy_control_enabled = True
-        self.status_label.config(text="Fuzzy Control: Açık")
+        self.linear_control_enabled = False
+        self.status_label.config(text="Kontrol Durumu: Fuzzy Açık")
         self.toggle_fuzzy_control_callback()
         print("Fuzzy Control Açıldı")
 
     def disable_fuzzy_control(self):
         self.fuzzy_control_enabled = False
-        self.status_label.config(text="Fuzzy Control: Kapalı")
+        self.status_label.config(text="Kontrol Durumu: Kapalı")
         self.toggle_fuzzy_control_callback()
         print("Fuzzy Control Kapandı")
+
+    def enable_linear_control(self):
+        self.linear_control_enabled = True
+        self.fuzzy_control_enabled = False
+        self.status_label.config(text="Kontrol Durumu: Lineer Açık")
+        self.toggle_linear_control_callback()
+        print("Lineer Control Açıldı")
+
+    def disable_linear_control(self):
+        self.linear_control_enabled = False
+        self.status_label.config(text="Kontrol Durumu: Kapalı")
+        self.toggle_linear_control_callback()
+        print("Lineer Control Kapandı")
 
     def start_camera(self):
         if not self.camera_running:
@@ -123,9 +142,9 @@ class UIControl:
             # timestamp'ı datetime objesine dönüştür
             if isinstance(timestamp, str):
                 try:
-                    timestamp = datetime.strptime(timestamp, "%Y-%m-%d %H:%M:%S.%f")  # Milisaniye içeren format
+                    timestamp = datetime.strptime(timestamp, "%Y-%m-%d %H:%M:%S.%f")
                 except ValueError:
-                    timestamp = datetime.strptime(timestamp, "%Y-%m-%d %H:%M:%S")  # Milisaniye yoksa standart format
+                    timestamp = datetime.strptime(timestamp, "%Y-%m-%d %H:%M:%S")
 
             self.xdata.append(timestamp)
             self.ydata.append(y)
