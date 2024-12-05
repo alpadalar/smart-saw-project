@@ -5,7 +5,7 @@ from threading import Thread
 from queue import Queue
 from modbus_reader import read_modbus_data
 from fuzzy_adjustment import adjust_speeds_based_on_current
-from linear_adjustment import adjust_speeds_linear
+from lineer_adjustment import adjust_speeds_linear
 from data_handler import process_row, insert_to_database, write_to_text_file
 from mqtt_publisher import mqtt_publisher
 from ui_control import UIControl
