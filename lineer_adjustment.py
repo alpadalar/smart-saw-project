@@ -36,9 +36,9 @@ speed_matrix = [
     [30, 72, 42],
     [20, 74, 45],
     [10, 76, 52],
-    [0, 78, 55],
+    [0, 78, 55]
 ]
-katsayi = 1.2
+katsayi = 1.10
 
 def interpolate_speeds_by_height(height):
     """
@@ -104,18 +104,20 @@ def adjust_speeds_linear(processed_speed_data, modbus_client, last_modbus_write_
     # Kafa yüksekliğine göre hızları lineer olarak hesapla
     kafa_yuksekligi_mm = processed_speed_data.get('kafa_yuksekligi_mm', 0)
     serit_kesme_hizi, serit_inme_hizi = interpolate_speeds_by_height(kafa_yuksekligi_mm)
+    print("inme1: ", serit_inme_hizi)
     serit_inme_hizi = serit_inme_hizi * katsayi
     serit_kesme_hizi = serit_kesme_hizi * katsayi
+    print("inmeKatsayili: ", serit_inme_hizi)
 
     # Sınır kontrolü (20 alt sınır, 100 üst sınır)
     new_serit_inme_hizi = max(5, min(serit_inme_hizi, 101))
     new_serit_kesme_hizi = max(5, min(serit_kesme_hizi, 101))
+    print("inmeSinirli: " , new_serit_inme_hizi)
 
     # Hız değerlerini güncelle
     processed_speed_data['serit_kesme_hizi'] = new_serit_kesme_hizi
     processed_speed_data['serit_inme_hizi'] = new_serit_inme_hizi
 
-    inme_hizi_is_negative = new_serit_inme_hizi < 0
 
     # Fuzzy output hesapla
     serit_motor_akim_a = processed_speed_data.get('serit_motor_akim_a', 0)
@@ -123,8 +125,11 @@ def adjust_speeds_linear(processed_speed_data, modbus_client, last_modbus_write_
     akim_degisim = serit_motor_akim_a - prev_current
     fuzzy_output_value = fuzzy_output(cikis_sim, serit_motor_akim_a, akim_degisim)
 
+    inme_hizi_is_negative = new_serit_inme_hizi < 0
+
     # Hızları Modbus üzerinden yaz
     reverse_calculate_value(modbus_client, new_serit_kesme_hizi, 'serit_kesme_hizi')
+    print("inmeSon: " , new_serit_inme_hizi)
     reverse_calculate_value(modbus_client, new_serit_inme_hizi, 'serit_inme_hizi', inme_hizi_is_negative)
 
     print(f"Lineer hız ayarlandı: Kesme Hızı={new_serit_kesme_hizi}, İnme Hızı={new_serit_inme_hizi}, Fuzzy Output={fuzzy_output_value}")

@@ -1,10 +1,24 @@
 import math
 import time
+import yaml
+from pymodbus.client import ModbusTcpClient
 
 # Statik register adresleri
 KESME_HIZI_REGISTER_ADDRESS = 2066
 INME_HIZI_REGISTER_ADDRESS = 2041
 
+config_path = "config.yaml"
+
+def read_config(file_path):
+    with open(file_path, 'r') as config_file:
+        config_data = yaml.safe_load(config_file)
+    return config_data
+
+
+config = read_config(config_path)
+MODBUS_IP = config["modbus"]["ip"]
+MODBUS_PORT = config["modbus"]["port"]
+modbus_client = ModbusTcpClient(MODBUS_IP, port=MODBUS_PORT)
 
 class SpeedBuffer:
     """
@@ -112,3 +126,30 @@ def write_to_modbus(modbus_client, address, value, is_negative=False):
 
     elif address == 2066:  # Kesme hızı adresi
         modbus_client.write_register(2066, value)
+
+
+def main():
+    for i in range(0, 600):
+        reverse_calculate_value(modbus_client, i+0.0, 'serit_inme_hizi')
+        time.sleep(0.1)
+        reverse_calculate_value(modbus_client, i+0.1, 'serit_inme_hizi')
+        time.sleep(0.1)
+        reverse_calculate_value(modbus_client, i+0.2, 'serit_inme_hizi')
+        time.sleep(0.1)
+        reverse_calculate_value(modbus_client, i+0.3, 'serit_inme_hizi')
+        time.sleep(0.1)
+        reverse_calculate_value(modbus_client, i+0.4, 'serit_inme_hizi')
+        time.sleep(0.1)
+        reverse_calculate_value(modbus_client, i+0.5, 'serit_inme_hizi')
+        time.sleep(0.1)
+        reverse_calculate_value(modbus_client, i+0.6, 'serit_inme_hizi')
+        time.sleep(0.1)
+        reverse_calculate_value(modbus_client, i+0.7, 'serit_inme_hizi')
+        time.sleep(0.1)
+        reverse_calculate_value(modbus_client, i+0.8, 'serit_inme_hizi')
+        time.sleep(0.1)
+        reverse_calculate_value(modbus_client, i+0.9, 'serit_inme_hizi')
+        time.sleep(0.1)
+
+if __name__ == "__main__":
+    main()
