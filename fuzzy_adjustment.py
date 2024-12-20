@@ -1,6 +1,11 @@
 import time
+from datetime import datetime
+from time import strftime
+
 from fuzzy_control import fuzzy_output
 from speed_utility import reverse_calculate_value, write_to_modbus
+
+cutting_start_timestamp = None
 
 
 def adjust_speeds_based_on_current(processed_speed_data, prev_current, cikis_sim, modbus_client,
@@ -26,13 +31,16 @@ def adjust_speeds_based_on_current(processed_speed_data, prev_current, cikis_sim
     # Testere aktif değilse veya adaptif kontrol kapalıysa oranı sıfırla
     if not adaptive_speed_control_enabled or testere_durumu != 3:
         if cutting_start_timestamp is not None:
+            cutting_start_timestamp = datetime.now().strftime("%H:%M:%S.%f")[:-3]
+            print(f"\n\nKesim işlemi bitti: {cutting_start_timestamp}\n\n")
             cutting_start_timestamp = None
             kesme_hizi_tracker.kesme_orani = (55.0 / 78.0) * 100
         return processed_speed_data.get('serit_motor_akim_a'), None, None, last_modbus_write_time
 
     # Kesim işlemi başlamışsa zaman damgasını oluştur
     if cutting_start_timestamp is None:
-        cutting_start_timestamp = time.time()
+        cutting_start_timestamp = datetime.now().strftime("%H:%M:%S.%f")[:-3]
+        print(f"\n\nKesim işlemi başladı: {cutting_start_timestamp}\n\n")
 
     current_time = time.time()
     if current_time - last_modbus_write_time < speed_adjustment_interval:
@@ -42,6 +50,7 @@ def adjust_speeds_based_on_current(processed_speed_data, prev_current, cikis_sim
     serit_motor_akim_a = processed_speed_data.get('serit_motor_akim_a')
     akim_degisim = serit_motor_akim_a - prev_current
     fuzzy_factor = fuzzy_output(cikis_sim, serit_motor_akim_a, akim_degisim)
+    print(f"Fuzzy Factor: {fuzzy_factor}, Akım: {serit_motor_akim_a}, Akım Değişim: {akim_degisim}")
 
     # Fuzzy faktöre göre katsayılar belirle
     if fuzzy_factor < 0:
@@ -65,9 +74,11 @@ def adjust_speeds_based_on_current(processed_speed_data, prev_current, cikis_sim
 
     # Değişiklikleri tamponla
     speed_buffer.add_to_buffer(kesme_hizi_delta, inme_hizi_delta)
+    print(f"Tampona Eklenen Kesme Hızı Değişimi: {kesme_hizi_delta}, İnme Hızı Değişimi: {inme_hizi_delta}")
 
     # Tampon dolduğunda değişiklikleri uygula
     if speed_buffer.adjust_and_check():
+        print("Tampon doldu, hızlar güncelleniyor.")
         kesme_hizi_adjustment, inme_hizi_adjustment = speed_buffer.get_adjustments()
         new_serit_kesme_hizi = processed_speed_data['serit_kesme_hizi']
         new_serit_inme_hizi = processed_speed_data['serit_inme_hizi'] + inme_hizi_adjustment

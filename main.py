@@ -116,8 +116,8 @@ def modbus_thread_func():
                     data_dict = dict(zip(columns.keys(), raw_data))
                     data_dict["timestamp"] = time.time()
                     processed_data = process_row(data_dict)
-                    if not prev_current:
-                        prev_current = None
+                    prev_prev_current = prev_current
+                    prev_current = processed_data.get('serit_motor_akim_a', None)
 
                     fuzzy_output_value = None
                     akim_degisim = None
@@ -132,7 +132,8 @@ def modbus_thread_func():
                             speed_buffer=speed_buffer,
                             last_modbus_write_time=last_modbus_write_time,
                             speed_adjustment_interval=speed_adjustment_interval,
-                            kesme_hizi_tracker=kesme_hizi_tracker
+                            kesme_hizi_tracker=kesme_hizi_tracker,
+                            cikis_sim=cikis_sim
                         )
                         processed_data["fuzzy_control"] = 1
 
@@ -143,7 +144,8 @@ def modbus_thread_func():
                             modbus_client=modbus_client,
                             last_modbus_write_time=last_modbus_write_time,
                             speed_adjustment_interval=speed_adjustment_interval,
-                            cikis_sim=cikis_sim
+                            cikis_sim=cikis_sim,
+                            prev_current = prev_prev_current
                         )
                         processed_data["fuzzy_control"] = 0
 

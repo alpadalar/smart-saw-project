@@ -1,4 +1,6 @@
 import time
+from datetime import datetime
+
 from speed_utility import reverse_calculate_value, write_to_modbus
 from fuzzy_control import fuzzy_output
 
@@ -36,7 +38,7 @@ speed_matrix = [
     [10, 76, 52],
     [0, 78, 55],
 ]
-
+katsayi = 1.2
 
 def interpolate_speeds_by_height(height):
     """
@@ -45,6 +47,7 @@ def interpolate_speeds_by_height(height):
     :param height: Yükseklik (mm)
     :return: Kesme hızı ve inme hızı
     """
+
     if height >= speed_matrix[0][0]:
         return speed_matrix[0][1], speed_matrix[0][2]
     elif height <= speed_matrix[-1][0]:
@@ -61,8 +64,9 @@ def interpolate_speeds_by_height(height):
             inme_hizi = ((height - low) / (high - low)) * (high_speeds[1] - low_speeds[1]) + low_speeds[1]
             return kesme_hizi, inme_hizi
 
-    return speed_matrix[-1][1], speed_matrix[-1][2]
+    return (speed_matrix[-1][1]), (speed_matrix[-1][2])
 
+cutting_start_timestamp = None
 
 def adjust_speeds_linear(processed_speed_data, modbus_client, last_modbus_write_time, speed_adjustment_interval, cikis_sim, prev_current):
     """
@@ -76,11 +80,20 @@ def adjust_speeds_linear(processed_speed_data, modbus_client, last_modbus_write_
     :return: Son yazma zamanı ve fuzzy output değeri
     """
     testere_durumu = processed_speed_data.get('testere_durumu')
+    global katsayi
+    global cutting_start_timestamp
 
     # Testere durumu aktif değilse çıkış yap
     if testere_durumu != 3:
-        print("Testere aktif değil, hızlar güncellenmeyecek.")
+        if cutting_start_timestamp is not None:
+            cutting_end_timestamp = datetime.now().strftime("%H:%M:%S.%f")[:-3]
+            print(f"\n\nKesim işlemi bitti: {cutting_end_timestamp}\n\n")
+            cutting_start_timestamp = None
         return last_modbus_write_time, None
+
+    if cutting_start_timestamp is None:
+        cutting_start_timestamp = datetime.now().strftime("%H:%M:%S.%f")[:-3]
+        print(f"\n\nKesim işlemi başladı: {cutting_start_timestamp}\n\n")
 
     current_time = time.time()
 
@@ -91,10 +104,12 @@ def adjust_speeds_linear(processed_speed_data, modbus_client, last_modbus_write_
     # Kafa yüksekliğine göre hızları lineer olarak hesapla
     kafa_yuksekligi_mm = processed_speed_data.get('kafa_yuksekligi_mm', 0)
     serit_kesme_hizi, serit_inme_hizi = interpolate_speeds_by_height(kafa_yuksekligi_mm)
+    serit_inme_hizi = serit_inme_hizi * katsayi
+    serit_kesme_hizi = serit_kesme_hizi * katsayi
 
     # Sınır kontrolü (20 alt sınır, 100 üst sınır)
-    new_serit_inme_hizi = max(20, min(serit_inme_hizi, 100))
-    new_serit_kesme_hizi = max(20, min(serit_kesme_hizi, 100))
+    new_serit_inme_hizi = max(5, min(serit_inme_hizi, 101))
+    new_serit_kesme_hizi = max(5, min(serit_kesme_hizi, 101))
 
     # Hız değerlerini güncelle
     processed_speed_data['serit_kesme_hizi'] = new_serit_kesme_hizi
